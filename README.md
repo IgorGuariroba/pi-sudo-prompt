@@ -25,7 +25,7 @@ Quando o agente (ou você, via `!`/`!!`) roda um comando com `sudo`, o pi abre u
 ```bash
 pi install npm:@igor-guari/pi-sudo-prompt
 # ou
-pi install git:github.com/IgorGuariroba/pi-sudo-prompt@v0.1.0
+pi install git:github.com/IgorGuariroba/pi-sudo-prompt@v0.1.1
 ```
 
 Requer Linux e o pi no modo interativo (TUI).
