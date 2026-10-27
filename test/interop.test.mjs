@@ -38,3 +38,16 @@ test("extension side only imports relative .ts modules", () => {
 		}
 	}
 });
+
+// Regression: protocol.ts was missing from package.json "files" (npm install would break).
+test("every relative import of a shipped file is shipped too", () => {
+	const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+	const shipped = new Set(pkg.files);
+	for (const entry of pkg.pi.extensions) assert.ok(shipped.has(entry.replace(/^\.\//, "")), `${entry} not shipped`);
+	for (const file of pkg.files.filter((f) => /\.(ts|mjs)$/.test(f))) {
+		const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+		for (const [, specifier] of source.matchAll(/from\s+["']\.\/([^"']+)["']/g)) {
+			assert.ok(shipped.has(specifier), `${file} imports ./${specifier}, missing from package.json "files"`);
+		}
+	}
+});
