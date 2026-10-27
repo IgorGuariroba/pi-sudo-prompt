@@ -53,6 +53,8 @@ agente: sudo whoami
 5. **Enter** responde com `password_response`; **Escape**, o timeout de 120 s ou o fim do `sudo` (por abort do tool, por exemplo) respondem com `password_denied`.
 6. O auxiliar imprime a senha no pipe do `sudo` e termina. Se a senha estiver errada, o `sudo` pede de novo, e o modal mostra `Incorrect password, try again (2/3)`.
 
+**Cancelar conta como tentativa falha:** para o PAM, um askpass cancelado (Escape ou timeout) é uma falha de autenticação, exatamente como no `sudo` sem a extensão. Com o `pam_faillock` padrão, 3 falhas em 15 minutos bloqueiam o `sudo` por 10 minutos. Para liberar antes: `faillock --user "$USER" --reset`.
+
 **Cache de credenciais:** sem TTY, o `sudo` (com o padrão `timestamp_type=tty`) guarda o cache por processo pai, e cada comando do agente roda num shell novo. Por isso **cada comando com `sudo` abre o modal de novo**. Agrupe as etapas num único comando (`sudo apt update && sudo apt upgrade -y`) para autenticar uma vez só. Dentro do mesmo comando, o cache vale normalmente.
 
 ## Limites

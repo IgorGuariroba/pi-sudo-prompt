@@ -35,3 +35,12 @@ Agora:
 - **Launcher:** usa `env -i` com uma lista fixa de variáveis. A extensão exige do auxiliar argv exato, `exe` igual ao node esperado e `environ` exatamente igual ao do launcher.
 
 Continua fora de alcance alterar arquivos que pertencem ao usuário (código do auxiliar, node do nvm). Isso exige um auxiliar com dono root e fica para um modo blindado opcional.
+
+## Revisão (0.1.2): módulos e `/reload`
+
+O pi carrega extensões com jiti (`moduleCache: false`). Arquivos `.ts` são recarregados a cada `/reload`, mas `.mjs`/`.js`/`.cjs` de um pacote `"type": "module"` são importados de forma nativa e ficam no cache do Node até o processo terminar. Cache busting também não funciona: o jiti ignora query string, e o código roda num `vm` sem `import()` nativo. Com um `protocol.mjs` compartilhado, uma atualização seguida de `/reload` misturava a `index.ts` nova com o protocolo velho (`launcherScript is not a function`).
+
+Por isso:
+
+- **Lado do pi:** importa só módulos `.ts` (`protocol.ts`, `modal.ts`). Um teste estático garante isso.
+- **Auxiliar:** `askpass.mjs` é autossuficiente e sempre roda num processo novo. As poucas funções que ele duplica (assinatura, checagem de sudo e de pipe) são mantidas em sincronia com `protocol.ts` por `test/interop.test.mjs`.

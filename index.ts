@@ -26,7 +26,6 @@ import {
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { SudoPromptModal } from "./modal.ts";
-// @ts-ignore -- plain ESM shared with the askpass helper
 import {
 	ENV_SECRET,
 	ENV_SOCKET,
@@ -35,10 +34,11 @@ import {
 	procInfo,
 	readCmdline,
 	SUDO_FUNCTION,
+	shellQuote,
 	sign,
 	validateRequester,
 	verify,
-} from "./protocol.mjs";
+} from "./protocol.ts";
 
 const PROMPT_TIMEOUT_MS = 120_000;
 const MAX_ATTEMPTS = 3; // sudoers passwd_tries default
@@ -54,10 +54,6 @@ interface Bridge {
 	server: Server;
 	attempts: Map<number, number>;
 	openModals: Set<SudoPromptModal>;
-}
-
-function shellQuote(value: string): string {
-	return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function displayCommand(sudoPid: number): string {

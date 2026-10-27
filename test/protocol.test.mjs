@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { isPrivilegedSudo, sign, SUDO_FUNCTION, verify } from "../protocol.mjs";
+import { isPrivilegedSudo, sign, SUDO_FUNCTION, verify } from "../protocol.ts";
 
 const helper = fileURLToPath(new URL("../askpass.mjs", import.meta.url));
 

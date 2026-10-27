@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { launcherScript, SUDO_FUNCTION, sign, validateRequester, verify } from "../protocol.mjs";
+import { launcherScript, SUDO_FUNCTION, sign, validateRequester, verify } from "../protocol.ts";
 
 const helperScript = fileURLToPath(new URL("../askpass.mjs", import.meta.url));
 const sudoAvailable = spawnSync("sh", ["-c", "command -v sudo"]).status === 0;
