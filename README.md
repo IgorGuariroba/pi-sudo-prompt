@@ -4,6 +4,10 @@ Prompt seguro de senha do `sudo` para o [Pi Coding Agent](https://pi.dev), no es
 
 Quando o agente (ou você, via `!`/`!!`) roda um comando com `sudo`, o pi abre um modal **Sudo Authentication Required** com campo mascarado. A senha vai direto para o `sudo` e **nunca passa pelo modelo**: não aparece no output do tool, na sessão nem no histórico.
 
+![pi-sudo-prompt](docs/media/cover.png)
+
+<details><summary>Versão texto</summary>
+
 ```
 ╭────────────────────────────────────────────────────────────────────╮
 │ 🔐 Sudo Authentication Required                                    │
@@ -20,12 +24,14 @@ Quando o agente (ou você, via `!`/`!!`) roda um comando com `sudo`, o pi abre u
 ╰────────────────────────────────────────────────────────────────────╯
 ```
 
+</details>
+
 ## Instalação
 
 ```bash
 pi install npm:@igor-guari/pi-sudo-prompt
 # ou
-pi install git:github.com/IgorGuariroba/pi-sudo-prompt@v0.1.2
+pi install git:github.com/IgorGuariroba/pi-sudo-prompt@v0.1.3
 ```
 
 Requer Linux e o pi no modo interativo (TUI).

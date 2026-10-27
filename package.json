@@ -1,6 +1,6 @@
 {
   "name": "@igor-guari/pi-sudo-prompt",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "description": "Prompt seguro de senha do sudo para o Pi Coding Agent — modal mascarado via SUDO_ASKPASS; a senha nunca passa pelo modelo",
   "keywords": [
@@ -21,9 +21,9 @@
     "modal.ts",
     "askpass.mjs",
     "protocol.ts",
-    "docs",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "docs/adr"
   ],
   "repository": {
     "type": "git",
@@ -39,6 +39,7 @@
   "pi": {
     "extensions": [
       "./index.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/IgorGuariroba/pi-sudo-prompt/main/docs/media/cover.png"
   }
 }
