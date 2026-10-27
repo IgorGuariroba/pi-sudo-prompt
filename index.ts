@@ -30,12 +30,13 @@ import { SudoPromptModal } from "./modal.ts";
 import {
 	ENV_SECRET,
 	ENV_SOCKET,
-	isPrivilegedSudo,
+	launcherScript,
 	MAX_SKEW_MS,
 	procInfo,
 	readCmdline,
 	SUDO_FUNCTION,
 	sign,
+	validateRequester,
 	verify,
 } from "./protocol.mjs";
 
@@ -134,14 +135,19 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 		if (!verify(bridge.secret, message) || message.type !== "password_request") return deny("bad signature");
 		if (Math.abs(Date.now() - Number(message.ts)) > MAX_SKEW_MS) return deny("stale request");
 
-		// Server-side re-check: the requester must be the askpass helper, child of a root sudo.
+		// Server-side re-check: the requester must be the genuine askpass helper, child of a root sudo.
 		const helperPid = Number(message.pid);
 		const sudoPid = Number(message.ppid);
-		const helper = procInfo(helperPid);
-		if (!helper || helper.ppid !== sudoPid || !readCmdline(helperPid).includes(helperScript)) {
-			return deny("requester is not the askpass helper");
-		}
-		if (!isPrivilegedSudo(sudoPid, process.getuid?.() ?? -1)) return deny("parent is not sudo");
+		const invalid = validateRequester({
+			helperPid,
+			sudoPid,
+			helperScript,
+			nodePath: process.execPath,
+			socketPath: bridge.socketPath,
+			secret: bridge.secret,
+			uid: process.getuid?.() ?? -1,
+		});
+		if (invalid) return deny(invalid);
 
 		for (const pid of bridge.attempts.keys()) if (!procInfo(pid)) bridge.attempts.delete(pid);
 		const attempt = (bridge.attempts.get(sudoPid) ?? 0) + 1;
@@ -156,7 +162,8 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 		const dir = mkdtempSync(join(process.env.XDG_RUNTIME_DIR || tmpdir(), "pi-sudo-prompt-")); // 0700
 		const socketPath = join(dir, "askpass.sock");
 		const askpassPath = join(dir, "pi-askpass");
-		writeFileSync(askpassPath, `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(helperScript)} "$@"\n`, {
+		const secret = randomBytes(32).toString("hex");
+		writeFileSync(askpassPath, launcherScript({ nodePath: process.execPath, helperScript, socketPath, secret }), {
 			mode: 0o700,
 		});
 
@@ -186,7 +193,7 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 			dir,
 			socketPath,
 			askpassPath,
-			secret: randomBytes(32).toString("hex"),
+			secret,
 			server,
 			attempts: new Map(),
 			openModals: new Set(),

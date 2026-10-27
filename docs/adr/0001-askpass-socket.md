@@ -23,4 +23,15 @@ O `-A` é forçado por uma função `sudo()` injetada antes do comando, e não p
 - Funciona onde o `sudo` funciona sem TTY, inclusive dentro de scripts.
 - A extensão precisa substituir o tool `bash` para injetar o env (`spawnHook`), o que conflita com outras extensões que também o substituam.
 - Depende de `/proc`, então é só Linux. No macOS seria preciso usar `sysctl`/`libproc`.
-- O segredo HMAC fica visível no env do shell do agente. A garantia real vem da checagem de processo (euid 0 do pai), não do segredo.
+- O segredo HMAC fica visível no env do shell do agente. A garantia real vem das checagens de processo, não do segredo.
+
+## Revisão (0.1.2): checar o pai não basta
+
+Na 0.1.1, o auxiliar e a extensão só conferiam se o pai era um sudo com euid 0. Isso é contornável porque o `exec` mantém o PID: um `SUDO_ASKPASS` malicioso com `exec <auxiliar> > arquivo` passava na checagem e recebia a senha. Também era possível injetar código no auxiliar via `NODE_OPTIONS`/`--import`. Os dois ataques foram reproduzidos com o sudo real.
+
+Agora:
+
+- **stdout do auxiliar:** precisa ser um FIFO anônimo com dono uid 0 e modo `600`, ou seja, o pipe que o sudo cria como root. Um processo do usuário não consegue criar nem reabrir um pipe assim (`/proc/<pid>/fd/1` dá `EACCES`). O auxiliar confere ao iniciar e de novo antes de escrever; a extensão confere no servidor.
+- **Launcher:** usa `env -i` com uma lista fixa de variáveis. A extensão exige do auxiliar argv exato, `exe` igual ao node esperado e `environ` exatamente igual ao do launcher.
+
+Continua fora de alcance alterar arquivos que pertencem ao usuário (código do auxiliar, node do nvm). Isso exige um auxiliar com dono root e fica para um modo blindado opcional.

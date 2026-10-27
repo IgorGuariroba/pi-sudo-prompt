@@ -4,7 +4,7 @@
 
 import { randomUUID } from "node:crypto";
 import { connect } from "node:net";
-import { ENV_SECRET, ENV_SOCKET, isPrivilegedSudo, sign, verify } from "./protocol.mjs";
+import { ENV_SECRET, ENV_SOCKET, isPrivilegedSudo, isSudoPipe, sign, verify } from "./protocol.mjs";
 
 function fail(reason) {
 	process.stderr.write(`pi-askpass: ${reason}\n`);
@@ -17,6 +17,7 @@ if (!socketPath || !secret) fail("not running inside a pi session with sudo-prom
 
 const uid = process.getuid();
 if (!isPrivilegedSudo(process.ppid, uid)) fail("refusing: parent process is not sudo/doas running as root");
+if (!isSudoPipe(1)) fail("refusing: stdout is not sudo's private pipe (possible hijacked SUDO_ASKPASS)");
 
 const id = randomUUID();
 const request = sign(secret, {
@@ -49,6 +50,7 @@ socket.on("data", (chunk) => {
 	socket.destroy();
 	if (!verify(secret, message) || message.id !== id) fail("invalid response signature");
 	if (message.type === "password_response" && typeof message.password === "string") {
+		if (!isSudoPipe(1)) fail("refusing: stdout changed while waiting");
 		process.stdout.write(`${message.password}\n`, () => process.exit(0));
 		return;
 	}

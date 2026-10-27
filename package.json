@@ -1,6 +1,6 @@
 {
   "name": "@igor-guari/pi-sudo-prompt",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Prompt seguro de senha do sudo para o Pi Coding Agent — modal mascarado via SUDO_ASKPASS; a senha nunca passa pelo modelo",
   "keywords": [
