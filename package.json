@@ -20,7 +20,7 @@
     "index.ts",
     "modal.ts",
     "askpass.mjs",
-    "protocol.mjs",
+    "protocol.ts",
     "docs",
     "README.md",
     "LICENSE"
