@@ -11,7 +11,7 @@ import { after, before, test } from "node:test";
 import { BROKER_PATH, PROTOCOL_VERSION, secretRunScript, validateSecretRequest } from "../secret.ts";
 import { createRequestServer } from "../socket.ts";
 
-const installed = existsSync(BROKER_PATH) && spawnSync("sudo", ["-n", "-l", "--", BROKER_PATH]).status === 0;
+const installed = process.env.PI_SUDO_PROMPT_TEST_NO_SUDO !== "1" && existsSync(BROKER_PATH) && spawnSync("sudo", ["-n", "-l", "--", BROKER_PATH]).status === 0;
 const skip = !installed && `needs the broker installed (sudo sh broker/install.sh); not found at ${BROKER_PATH}`;
 
 const SECRET = `FAKE-secret-${randomBytes(6).toString("hex")}`;

@@ -112,6 +112,12 @@ Cada linha contém o caminho **real absoluto** do executável e o formato exato 
 
 Esse formato não libera `show -s`, `export` nem argumentos extras. O broker resolve symlinks antes de pedir consentimento e executa o mesmo caminho apresentado. Comandos permitidos têm modal normal; os demais continuam funcionando mediante aprovação, mas com aviso vermelho. A descrição do agente continua marcada como "não verificada" nos dois casos.
 
+**Liberar pelo TUI:** depois de um modal com aviso vermelho, execute `/sudo-prompt allow`. O comando usa apenas o último argv não verificado mostrado nesta sessão (inclusive se o pedido foi cancelado), abre um editor para ajustar o formato e exige uma confirmação explícita antes de chamar sudo. Para `keepassxc-cli show -q -t`, sugere `<db> <entrada>`; nos demais casos conserva os argumentos, sem adivinhar quais opções são seguras. Você pode substituir valores por marcadores. O formato editado precisa corresponder ao pedido anterior. Sem histórico ou fora do TUI, recusa.
+
+A gravação acrescenta uma linha sem substituir comentários, dono root ou permissões existentes. Não segue symlinks nem cria uma allowlist ausente/insegura: instale o broker primeiro. Usa o mesmo modal do sudo; com credenciais em cache, o sudo pode não pedir senha, mas a confirmação do formato continua obrigatória. O próximo pedido relê o arquivo e só perde o aviso se corresponder ao formato aprovado.
+
+**Barreira usuário/agente:** `allow` não é uma tool e texto de resposta do modelo não executa comandos. Porém, no runtime do pi inspecionado, `sendUserMessage(..., { expandPromptTemplates: true })` de uma extensão pode despachar comandos registrados, antes do evento `input`; o contexto do handler não informa a origem. Portanto não há garantia absoluta de que apenas uma entrada humana possa *abrir* o comando. A confirmação no TUI impede a gravação automática pelo caminho de `allow`, inclusive com sudo em cache. Leia o formato antes de confirmar. Código do mesmo uid que altere a extensão, controle o terminal ou use sudo por outro caminho não é isolado por essa UI. O critério de origem exclusivamente humana da issue #8 permanece uma limitação do runtime, não uma propriedade garantida por `registerCommand`.
+
 **Limites da garantia:**
 - Fora da allowlist, a segurança depende de ler o comando e o aviso vermelho. Se você aprovar um comando que ecoa o que recebe (`cat`, por exemplo), o segredo vai para o agente por escolha sua. Leia o comando no modal.
 - O comando roda com o seu uid, então a memória dele fica ao alcance do ptrace: com `kernel.yama.ptrace_scope=0`, por qualquer processo seu; com `ptrace_scope=1`, por um processo seu que seja ancestral dele (um programa que lança o `pi-secret-run` e depois depura o comando). A garantia contra reabrir o pipe e ler o `environ` não cobre esse caso.
@@ -119,6 +125,7 @@ Esse formato não libera `show -s`, `export` nem argumentos extras. O broker res
 ## Desenvolvimento
 
 ```bash
+PI_SUDO_PROMPT_TEST_NO_SUDO=1 npm test  # modo sem chamadas a sudo; pula testes que o exigem
 npm test                      # protocolo, auxiliar, função sudo(), ataques de exfiltração (sudo real, sem autenticar)
                               # e pi-secret-run → broker real (pulados se o broker não estiver instalado)
 pi install ./                 # carrega a cópia local

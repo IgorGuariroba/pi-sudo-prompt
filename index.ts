@@ -30,6 +30,7 @@ import {
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { installationHint, registerInstallCommand } from "./install.ts";
+import { createAllowCommand } from "./allow-command.ts";
 import { SecretRequestModal, SudoPromptModal } from "./modal.ts";
 import {
 	ENV_SECRET,
@@ -81,6 +82,16 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 	let binDir: string | undefined;
 	let uiContext: ExtensionContext | undefined;
 	const modals = new ModalQueue();
+
+	async function runUserCommand(command: string, cwd: string) {
+		if (!bridge || !uiContext) throw new Error("no interactive sudo bridge");
+		const injected = injectAskpass({ command, cwd, env: process.env });
+		// Local execution, not a tool call/chat message; existing sudo modal, no output persisted.
+		return createLocalBashOperations().exec(injected.command, injected.cwd, {
+			env: injected.env, timeout: 180, onData() {},
+		});
+	}
+	const allowCommand = createAllowCommand({ run: runUserCommand });
 
 	function withSecretRun(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 		if (!binDir) return env;
@@ -157,8 +168,11 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 				const classification = classifySecretRequest(argv, readTrustedAllowlist());
 				const secret = await showModal(
 					socket,
-					(tui, theme, keybindings, done) =>
-						new SecretRequestModal(tui, theme, keybindings, { argv, label, classification, timeoutMs: PROMPT_TIMEOUT_MS }, done),
+					(tui, theme, keybindings, done) => {
+						const modal = new SecretRequestModal(tui, theme, keybindings, { argv, label, classification, timeoutMs: PROMPT_TIMEOUT_MS }, done);
+						allowCommand.observe(argv, classification);
+						return modal;
+					},
 				);
 				if (secret === undefined) deny("secret request cancelled or timed out");
 				else reply({ type: "secret_response", id, secret });
@@ -250,6 +264,7 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", () => {
 		uiContext = undefined;
+		allowCommand.reset();
 		stopBridge();
 		if (binDir) rmSync(binDir, { recursive: true, force: true });
 		binDir = undefined;
@@ -257,17 +272,8 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 
 	registerInstallCommand(pi, {
 		installer,
-		async run(command, cwd) {
-			if (!bridge || !uiContext) throw new Error("no interactive sudo bridge");
-			const injected = injectAskpass({ command, cwd, env: process.env });
-			// Local execution, not a tool call or a chat message. The existing sudo bridge
-			// supplies SUDO_ASKPASS and opens the same masked sudo modal as before.
-			return createLocalBashOperations().exec(injected.command, injected.cwd, {
-				env: injected.env,
-				timeout: 180,
-				onData() {},
-			});
-		},
+		run: runUserCommand,
+		allow: allowCommand.handler,
 	});
 
 	// Agent bash tool: same as the built-in, plus the askpass environment.
