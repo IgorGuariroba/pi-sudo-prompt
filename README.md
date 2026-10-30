@@ -98,6 +98,8 @@ As duas opções usam o mesmo instalador: broker em `/usr/local/libexec/pi-sudo-
 
 **Como funciona:** `pi-secret-run` chama o broker por `sudo -n`. O broker, como root, pede o segredo à extensão pelo socket da sessão e prova que é ele com um arquivo em `/run/pi-sudo-prompt` que só root pode criar. A extensão confere euid 0, o argv exato `/usr/bin/python3 -I <broker> …` e os arquivos com dono root. Depois o broker cria um pipe como root (`0600`), executa o comando com o seu uid/gid (nunca root) e escreve o segredo no stdin dele. O segredo nunca vai por variável de ambiente.
 
+**Sem suporte a `--fd`/`--password-file` por enquanto:** no Linux, o consumidor sem root não consegue reabrir o pipe root `0600` por `/dev/fd/N`. Não há fallback com permissões mais fracas. Reprodução e alternativas em [`docs/issue-6-bloqueio-fd.md`](docs/issue-6-bloqueio-fd.md).
+
 **Recusas** (código de saída diferente de zero, com o motivo): broker ausente (a mensagem mostra como instalar), versão divergente, fora do TUI, sistema que não é Linux, modal cancelado ou expirado. Não há modo sem root.
 
 **Allowlist:** `/etc/pi-sudo-prompt/allowlist`, criada vazia pelo instalador, com exemplos comentados. Reinstalar preserva o arquivo existente. Edite com `sudoedit /etc/pi-sudo-prompt/allowlist`. Apenas arquivos regulares com dono root, sem escrita para grupo/outros e em diretórios protegidos são aceitos; ausente ou inseguro equivale a uma lista vazia.
