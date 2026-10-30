@@ -13,7 +13,8 @@ import { fileURLToPath } from "node:url";
 import { launcherScript, SUDO_FUNCTION, sign, validateRequester, verify } from "../protocol.ts";
 
 const helperScript = fileURLToPath(new URL("../askpass.mjs", import.meta.url));
-const sudoAvailable = spawnSync("sh", ["-c", "command -v sudo"]).status === 0;
+// Non-interactive implementers can run the suite without ever invoking sudo.
+const sudoAvailable = process.env.PI_SUDO_PROMPT_TEST_NO_SUDO !== "1" && spawnSync("sh", ["-c", "command -v sudo"]).status === 0;
 const sudoNeedsPassword = sudoAvailable && spawnSync("sudo", ["-n", "-k", "true"]).status !== 0;
 const skip = !sudoNeedsPassword && "needs sudo that asks for a password (no NOPASSWD, no cached credentials)";
 

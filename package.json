@@ -18,9 +18,15 @@
   ],
   "files": [
     "index.ts",
+    "install.ts",
     "modal.ts",
     "askpass.mjs",
     "protocol.ts",
+    "socket.ts",
+    "secret.ts",
+    "allowlist.ts",
+    "allow-command.ts",
+    "broker",
     "README.md",
     "LICENSE",
     "docs/adr"
