@@ -26,10 +26,18 @@ test("shows the agent's description marked as not verified", () => {
 	assert.match(text(content.lines), /não verificada/);
 });
 
-test("always carries the red warning in this phase", () => {
+test("comando não verificado recebe o aviso vermelho", () => {
 	const warning = content.lines.find((l) => l.style === "error");
 	assert.ok(warning);
 	assert.match(warning.text, /este comando pode mostrar ao agente o que você digitar/);
+});
+
+test("formato permitido não recebe aviso vermelho, mas mantém argv e descrição não verificada", () => {
+	const allowed = secretModalContent({ argv: ["/usr/bin/keepassxc-cli", "show", "-q", "-t", "db.kdbx", "npm"], label: "senha mestra" }, "allowed");
+	assert.ok(!allowed.lines.some((line) => line.style === "error"));
+	assert.match(text(allowed.lines), /\/usr\/bin\/keepassxc-cli show -q -t db\.kdbx npm/);
+	assert.match(text(allowed.lines), /Descrição do agente \(não verificada\)/);
+	assert.match(text(allowed.lines), /senha mestra/);
 });
 
 test("terminal control characters from the agent are shown escaped, never interpreted", () => {

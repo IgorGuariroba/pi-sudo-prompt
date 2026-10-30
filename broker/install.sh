@@ -44,19 +44,27 @@ mv -f "$tmp" "$SUDOERS"
 trap - EXIT
 visudo -c >/dev/null || fail "sudoers is invalid after the change; remove $SUDOERS"
 
-# Empty by default: examples are comments, never implicit approvals.
-# noclobber also protects an existing allowlist during concurrent installations.
+# Start with no approved consumers. Never overwrite an administrator's existing file
+# (including a symlink). Publish with ln, which also refuses a destination created meanwhile.
 install -d -o root -g root -m 0755 "$(dirname "$ALLOWLIST")"
 if [ ! -e "$ALLOWLIST" ] && [ ! -L "$ALLOWLIST" ]; then
-	(set -C; umask 022; cat >"$ALLOWLIST" <<'EOF'
-# pi-sudo-prompt allowlist: absolute executable + argument format.
-# Nothing is approved by default. Edit with sudoedit /etc/pi-sudo-prompt/allowlist.
-# Example (adjust the executable path before uncommenting):
+    tmp=$(mktemp "$(dirname "$ALLOWLIST")/.allowlist.XXXXXX")
+    trap 'rm -f "$tmp"' EXIT
+    cat >"$tmp" <<'EOF'
+# pi-sudo-prompt allowlist: no consumer is approved by default.
+# Edit with: sudoedit /etc/pi-sudo-prompt/allowlist
+# Each line: absolute REAL executable path, followed by whitespace-separated arguments.
+# <name> matches exactly one nonempty argument, never an option beginning with '-'.
+# Examples (uncomment only after reviewing the executable and its argument format):
 # /usr/bin/keepassxc-cli show -q -t <db> <entrada>
+# /usr/bin/gh auth login --with-token
+# /usr/bin/docker login --password-stdin <registry>
 EOF
-	) || fail "could not create initial allowlist (existing files are never overwritten)"
-	chown root:root "$ALLOWLIST"
-	chmod 0644 "$ALLOWLIST"
+    chown root:root "$tmp"
+    chmod 0644 "$tmp"
+    ln "$tmp" "$ALLOWLIST" || fail "allowlist already exists; refusing to overwrite it"
+    rm -f "$tmp"
+    trap - EXIT
 fi
 
 printf 'pi-secret-broker installed at %s (sudoers rule %s).\n' "$BROKER" "$SUDOERS"

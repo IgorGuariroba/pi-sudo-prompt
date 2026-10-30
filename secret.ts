@@ -12,10 +12,11 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname } from "node:path";
+import { resolveConsumerArgv, type SecretClassification } from "./allowlist.ts";
 import { canonical, MAX_SKEW_MS, type Message, procInfo, readCmdline, shellQuote } from "./protocol.ts";
 
 /** Bump together with PROTOCOL_VERSION in broker/pi-secret-broker. */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const BROKER_PATH = "/usr/local/libexec/pi-sudo-prompt/pi-secret-broker";
 export const BROKER_INTERPRETER = "/usr/bin/python3";
 /** Root-owned directory where the broker proves a request is its own (see validateSecretRequest). */
@@ -140,6 +141,12 @@ export function validateSecretRequest(
 	if (!info || info.realUid !== 0 || info.effectiveUid !== 0) return "requester is not running as root (not the broker)";
 	const expected = [BROKER_INTERPRETER, "-I", BROKER_PATH, "--label", label, "--", ...(argv as string[])];
 	const cmdline = readCmdline(pid as number);
+	// The broker resolves argv[0] before requesting consent and executes that same path.
+	try {
+		if (cmdline[5] === "--" && cmdline[6]) cmdline[6] = resolveConsumerArgv(cmdline.slice(6))[0];
+	} catch {
+		return "cannot resolve the consumer executable";
+	}
 	if (cmdline.length !== expected.length || cmdline.some((arg, i) => arg !== expected[i])) {
 		return "requester is not the installed broker";
 	}
@@ -166,8 +173,11 @@ export interface ModalLine {
 	style: "text" | "dim" | "error" | "label";
 }
 
-/** Text of the secret request modal. Always unverified in this phase: the allowlist comes later. */
-export function secretModalContent(request: { argv: string[]; label: string }): { title: string; lines: ModalLine[] } {
+/** Text of the secret request modal. Classification never verifies the agent's description. */
+export function secretModalContent(
+	request: { argv: string[]; label: string },
+	classification: SecretClassification = "unverified",
+): { title: string; lines: ModalLine[] } {
 	return {
 		title: SECRET_MODAL_TITLE,
 		lines: [
@@ -177,7 +187,7 @@ export function secretModalContent(request: { argv: string[]; label: string }): 
 			{ text: "Descrição do agente (não verificada):", style: "dim" },
 			{ text: visible(request.label) || "(vazia)", style: "label" },
 			{ text: "", style: "text" },
-			{ text: UNVERIFIED_WARNING, style: "error" },
+			...(classification === "allowed" ? [] : [{ text: UNVERIFIED_WARNING, style: "error" as const }]),
 		],
 	};
 }

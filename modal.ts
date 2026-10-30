@@ -10,6 +10,7 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import { SUDO_MODAL_TITLE } from "./protocol.ts";
+import type { SecretClassification } from "./allowlist.ts";
 import { secretModalContent } from "./secret.ts";
 
 export interface SudoPromptRequest {
@@ -186,6 +187,7 @@ export class SudoPromptModal extends MaskedPromptModal {
 }
 
 export interface SecretRequestView {
+	classification: SecretClassification;
 	/** Real argv of the consumer, read by the root broker. */
 	argv: string[];
 	/** Description written by the agent (not verified). */
@@ -207,7 +209,7 @@ export class SecretRequestModal extends MaskedPromptModal {
 
 	protected body(clock: string) {
 		const t = this.theme;
-		const { title, lines } = secretModalContent(this.request);
+		const { title, lines } = secretModalContent(this.request, this.request.classification);
 		const styled = lines.map(({ text, style }) => {
 			if (style === "error") return t.bold(t.fg("error", text));
 			if (style === "label") return t.italic(t.fg("text", text));

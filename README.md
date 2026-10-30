@@ -86,7 +86,7 @@ Para um **segredo durável** de outro consumidor (senha mestra do `keepassxc-cli
 pi-secret-run --label "senha mestra do KeePassXC" -- keepassxc-cli show -q -t db.kdbx npm
 ```
 
-O pi abre o modal **Pedido de segredo**, com título diferente do modal do sudo. O modal mostra o argv real lido pelo broker, a descrição do agente marcada como "não verificada" e o aviso vermelho "este comando pode mostrar ao agente o que você digitar". O segredo digitado vai para o stdin do comando. O agente vê só a saída do comando (um OTP, por exemplo). Não há cache: cada chamada abre o modal. Decisões em [`docs/adr/0002-broker-root-para-segredos-duraveis.md`](docs/adr/0002-broker-root-para-segredos-duraveis.md).
+O pi abre o modal **Pedido de segredo**, com título diferente do modal do sudo. O modal mostra o argv real lido pelo broker, a descrição do agente marcada como "não verificada" e, quando o formato do comando não está na allowlist, o aviso vermelho "este comando pode mostrar ao agente o que você digitar". O segredo digitado vai para o stdin do comando. O agente vê só a saída do comando (um OTP, por exemplo). Não há cache: cada chamada abre o modal. Decisões em [`docs/adr/0002-broker-root-para-segredos-duraveis.md`](docs/adr/0002-broker-root-para-segredos-duraveis.md).
 
 **Instalação do broker (uma vez, como root).** No TUI do pi, o usuário pode executar `/sudo-prompt install-broker`: a senha vem do modal existente do sudo, sem passar pelo agente. É um comando de usuário, não uma tool; fora do TUI ele recusa. Para instalar manualmente, leia o script antes de rodar:
 
@@ -100,8 +100,18 @@ As duas opções usam o mesmo instalador: broker em `/usr/local/libexec/pi-sudo-
 
 **Recusas** (código de saída diferente de zero, com o motivo): broker ausente (a mensagem mostra como instalar), versão divergente, fora do TUI, sistema que não é Linux, modal cancelado ou expirado. Não há modo sem root.
 
+**Allowlist:** `/etc/pi-sudo-prompt/allowlist`, criada vazia pelo instalador, com exemplos comentados. Reinstalar preserva o arquivo existente. Edite com `sudoedit /etc/pi-sudo-prompt/allowlist`. Apenas arquivos regulares com dono root, sem escrita para grupo/outros e em diretórios protegidos são aceitos; ausente ou inseguro equivale a uma lista vazia.
+
+Cada linha contém o caminho **real absoluto** do executável e o formato exato de argumentos, separados por espaços. Linhas iniciadas por `#` são comentários. Um marcador como `<db>` ou `<entrada>` aceita exatamente um argumento não vazio que não comece com `-` (inclusive um caminho com espaços). Não há glob, expansão de shell nem argumentos opcionais. Por exemplo:
+
+```text
+/usr/bin/keepassxc-cli show -q -t <db> <entrada>
+```
+
+Esse formato não libera `show -s`, `export` nem argumentos extras. O broker resolve symlinks antes de pedir consentimento e executa o mesmo caminho apresentado. Comandos permitidos têm modal normal; os demais continuam funcionando mediante aprovação, mas com aviso vermelho. A descrição do agente continua marcada como "não verificada" nos dois casos.
+
 **Limites da garantia:**
-- O aviso vermelho aparece sempre nesta versão. Se você aprovar um comando que ecoa o que recebe (`cat`, por exemplo), o segredo vai para o agente por escolha sua. Leia o comando no modal.
+- Fora da allowlist, a segurança depende de ler o comando e o aviso vermelho. Se você aprovar um comando que ecoa o que recebe (`cat`, por exemplo), o segredo vai para o agente por escolha sua. Leia o comando no modal.
 - O comando roda com o seu uid, então a memória dele fica ao alcance do ptrace: com `kernel.yama.ptrace_scope=0`, por qualquer processo seu; com `ptrace_scope=1`, por um processo seu que seja ancestral dele (um programa que lança o `pi-secret-run` e depois depura o comando). A garantia contra reabrir o pipe e ler o `environ` não cobre esse caso.
 
 ## Desenvolvimento

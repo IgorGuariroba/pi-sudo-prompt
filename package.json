@@ -24,6 +24,7 @@
     "protocol.ts",
     "socket.ts",
     "secret.ts",
+    "allowlist.ts",
     "broker",
     "README.md",
     "LICENSE",

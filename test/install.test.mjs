@@ -3,13 +3,50 @@
 // broker where the extension expects it and validates sudoers with visudo before enabling it.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { classifySecretRequest } from "../allowlist.ts";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { BROKER_PATH } from "../secret.ts";
 
 const installer = fileURLToPath(new URL("../broker/install.sh", import.meta.url));
 const source = readFileSync(installer, "utf8");
+
+test("instala allowlist vazia com exemplos comentados e preserva configuração existente", () => {
+	// Sandbox only: root ownership and system paths are replaced, never invoking sudo.
+	const dir = mkdtempSync(join(tmpdir(), "pi-install-"));
+	try {
+		const bin = join(dir, "bin");
+		mkdirSync(bin);
+		mkdirSync(join(dir, "sudoers.d"));
+		for (const [command, script] of Object.entries({ id: "echo 0", visudo: "exit 0", chown: "exit 0" })) {
+			writeFileSync(join(bin, command), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+		}
+		writeFileSync(join(dir, "pi-secret-broker"), "#!/usr/bin/python3\n");
+		const sandbox = source.replaceAll("/usr/local/libexec/pi-sudo-prompt", `${dir}/libexec`)
+			.replaceAll("/etc/sudoers.d", `${dir}/sudoers.d`)
+			.replaceAll("/etc/pi-sudo-prompt", `${dir}/config`)
+			.replaceAll("-o root -g root ", "");
+		const script = join(dir, "install.sh");
+		writeFileSync(script, sandbox);
+		const run = () => {
+			const result = spawnSync("sh", [script], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+			assert.equal(result.status, 0, result.stderr);
+		};
+		run();
+		const file = join(dir, "config", "allowlist");
+		const initial = readFileSync(file, "utf8");
+		assert.match(initial, /#.*\/usr\/bin\/keepassxc-cli show -q -t <db> <entrada>/);
+		assert.ok(initial.split("\n").every((line) => !line.trim() || line.trim().startsWith("#")));
+		assert.equal(classifySecretRequest(["/usr/bin/keepassxc-cli", "show", "-q", "-t", "db", "npm"], initial), "unverified");
+		writeFileSync(file, "/usr/bin/keepassxc-cli show -q -t <db> <entrada>\n");
+		chmodSync(file, 0o640);
+		run();
+		assert.equal(readFileSync(file, "utf8"), "/usr/bin/keepassxc-cli show -q -t <db> <entrada>\n");
+	} finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 const isolatedRoot = spawnSync("unshare", ["-Ur", "-m", "sh", "-c", "mount -t tmpfs tmpfs /etc && mount -t tmpfs tmpfs /usr/local"], { encoding: "utf8" });
 
