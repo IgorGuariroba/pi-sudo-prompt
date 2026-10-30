@@ -33,6 +33,10 @@ Assim, a mesma proteção root `0600` que impede o agente de reabrir o pipe tamb
 - **Interposição de `open` ou tradução de `/dev/fd/N` em wrapper:** não é compatível genericamente com binários estáticos, runtimes e chamadas diretas ao kernel; não é solução genérica segura.
 - **Isolamento adicional (outro uid, namespaces/mounts, controle de acesso):** precisaria de novo projeto e auditoria; não foi implementado nem validado. Não afirmar impossibilidade para todas as arquiteturas, apenas incompatibilidade com a arquitetura atual.
 
+## Validação final
+
+Após `git merge feat/pi-secret-run`, `npm test`: 61 testes, 53 passaram, 8 pulados, nenhuma falha. A reprodução por user namespace passou; testes que dependem de broker instalado/sudo foram pulados. Nenhum comando sudo foi executado para esta investigação.
+
 ## Pendências para integração
 
 Decidir entre restringir o contrato a leitores diretos de fd ou redesenhar o isolamento para consumidores por caminho. Só depois implementar parsing/validação de `--fd N`, conflitos de fd, vínculo do argv real à validação do broker e seam 1 completo. O fluxo do sudo e o canal stdin não foram alterados; nenhuma permissão foi relaxada. Testes de broker instalado continuam com `skip` quando ele não está disponível.
