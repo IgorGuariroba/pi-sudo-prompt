@@ -29,6 +29,7 @@ import {
 	getAgentDir,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { installationHint, registerInstallCommand } from "./install.ts";
 import { SecretRequestModal, SudoPromptModal } from "./modal.ts";
 import {
 	ENV_SECRET,
@@ -49,7 +50,8 @@ const MAX_ATTEMPTS = 3; // sudoers passwd_tries default
 
 const extensionDir = dirname(fileURLToPath(import.meta.url));
 const helperScript = join(extensionDir, "askpass.mjs");
-const INSTALL_HINT = `sudo sh ${shellQuote(join(extensionDir, "broker", "install.sh"))}`;
+const installer = join(extensionDir, "broker", "install.sh");
+const INSTALL_HINT = installationHint(installer);
 
 interface Bridge {
 	dir: string;
@@ -249,6 +251,21 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 		stopBridge();
 		if (binDir) rmSync(binDir, { recursive: true, force: true });
 		binDir = undefined;
+	});
+
+	registerInstallCommand(pi, {
+		installer,
+		async run(command, cwd) {
+			if (!bridge || !uiContext) throw new Error("no interactive sudo bridge");
+			const injected = injectAskpass({ command, cwd, env: process.env });
+			// Local execution, not a tool call or a chat message. The existing sudo bridge
+			// supplies SUDO_ASKPASS and opens the same masked sudo modal as before.
+			return createLocalBashOperations().exec(injected.command, injected.cwd, {
+				env: injected.env,
+				timeout: 180,
+				onData() {},
+			});
+		},
 	});
 
 	// Agent bash tool: same as the built-in, plus the askpass environment.

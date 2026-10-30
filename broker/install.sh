@@ -12,6 +12,7 @@ set -eu
 
 BROKER=/usr/local/libexec/pi-sudo-prompt/pi-secret-broker
 SUDOERS=/etc/sudoers.d/pi-sudo-prompt
+ALLOWLIST=/etc/pi-sudo-prompt/allowlist
 SOURCE=$(dirname "$0")/pi-secret-broker
 
 fail() { printf 'install: %s\n' "$1" >&2; exit 1; }
@@ -42,5 +43,20 @@ visudo -c -f "$tmp" >/dev/null || fail "generated sudoers rule is invalid; nothi
 mv -f "$tmp" "$SUDOERS"
 trap - EXIT
 visudo -c >/dev/null || fail "sudoers is invalid after the change; remove $SUDOERS"
+
+# Empty by default: examples are comments, never implicit approvals.
+# noclobber also protects an existing allowlist during concurrent installations.
+install -d -o root -g root -m 0755 "$(dirname "$ALLOWLIST")"
+if [ ! -e "$ALLOWLIST" ] && [ ! -L "$ALLOWLIST" ]; then
+	(set -C; umask 022; cat >"$ALLOWLIST" <<'EOF'
+# pi-sudo-prompt allowlist: absolute executable + argument format.
+# Nothing is approved by default. Edit with sudoedit /etc/pi-sudo-prompt/allowlist.
+# Example (adjust the executable path before uncommenting):
+# /usr/bin/keepassxc-cli show -q -t <db> <entrada>
+EOF
+	) || fail "could not create initial allowlist (existing files are never overwritten)"
+	chown root:root "$ALLOWLIST"
+	chmod 0644 "$ALLOWLIST"
+fi
 
 printf 'pi-secret-broker installed at %s (sudoers rule %s).\n' "$BROKER" "$SUDOERS"

@@ -18,6 +18,7 @@
   ],
   "files": [
     "index.ts",
+    "install.ts",
     "modal.ts",
     "askpass.mjs",
     "protocol.ts",
