@@ -88,13 +88,13 @@ pi-secret-run --label "senha mestra do KeePassXC" -- keepassxc-cli show -q -t db
 
 O pi abre o modal **Pedido de segredo**, com título diferente do modal do sudo. O modal mostra o argv real lido pelo broker, a descrição do agente marcada como "não verificada" e, quando o formato do comando não está na allowlist, o aviso vermelho "este comando pode mostrar ao agente o que você digitar". O segredo digitado vai para o stdin do comando. O agente vê só a saída do comando (um OTP, por exemplo). Não há cache: cada chamada abre o modal. Decisões em [`docs/adr/0002-broker-root-para-segredos-duraveis.md`](docs/adr/0002-broker-root-para-segredos-duraveis.md).
 
-**Instalação do broker (uma vez, como root).** Leia o script antes de rodar:
+**Instalação do broker (uma vez, como root).** No TUI do pi, o usuário pode executar `/sudo-prompt install-broker`: a senha vem do modal existente do sudo, sem passar pelo agente. É um comando de usuário, não uma tool; fora do TUI ele recusa. Para instalar manualmente, leia o script antes de rodar:
 
 ```bash
 sudo sh ~/.pi/agent/<caminho do pacote>/broker/install.sh   # a mensagem de recusa do pi-secret-run mostra o caminho exato
 ```
 
-Ele instala `/usr/local/libexec/pi-sudo-prompt/pi-secret-broker` (Python, só biblioteca padrão, dono root) e a regra `/etc/sudoers.d/pi-sudo-prompt` (`NOPASSWD` só para o broker), validada com `visudo -c`. Rode de novo depois de atualizar o pacote: a extensão recusa um broker de outra versão do protocolo.
+As duas opções usam o mesmo instalador: broker em `/usr/local/libexec/pi-sudo-prompt/pi-secret-broker` (Python, só biblioteca padrão, dono root), regra `/etc/sudoers.d/pi-sudo-prompt` (`NOPASSWD` só para o broker), validada com `visudo -c`, e allowlist inicial em `/etc/pi-sudo-prompt/allowlist` (root, vazia com exemplos comentados). Uma allowlist existente nunca é sobrescrita. Rode de novo depois de atualizar o pacote: o broker é atualizado e a extensão recusa versões divergentes do protocolo.
 
 **Como funciona:** `pi-secret-run` chama o broker por `sudo -n`. O broker, como root, pede o segredo à extensão pelo socket da sessão e prova que é ele com um arquivo em `/run/pi-sudo-prompt` que só root pode criar. A extensão confere euid 0, o argv exato `/usr/bin/python3 -I <broker> …` e os arquivos com dono root. Depois o broker cria um pipe como root (`0600`), executa o comando com o seu uid/gid (nunca root) e escreve o segredo no stdin dele. O segredo nunca vai por variável de ambiente.
 

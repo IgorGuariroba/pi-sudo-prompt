@@ -48,6 +48,35 @@ test("instala allowlist vazia com exemplos comentados e preserva configuração 
 	} finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+const isolatedRoot = spawnSync("unshare", ["-Ur", "-m", "sh", "-c", "mount -t tmpfs tmpfs /etc && mount -t tmpfs tmpfs /usr/local"], { encoding: "utf8" });
+
+test("installer creates a root-owned empty allowlist, preserves edits and updates the broker", {
+	skip: isolatedRoot.status !== 0 ? "user/mount namespaces unavailable; requires isolated root filesystem" : false,
+}, () => {
+	const result = spawnSync("unshare", ["-Ur", "-m", "sh", "-eu", "-c", `
+		mount -t tmpfs tmpfs /etc
+		mount -t tmpfs tmpfs /usr/local
+		printf 'root:x:0:0:root:/root:/bin/sh\\n' > /etc/passwd
+		printf 'root:x:0:\\n' > /etc/group
+		mkdir -p /etc/sudoers.d
+		printf 'root ALL=(ALL) ALL\\n' > /etc/sudoers
+		chmod 0440 /etc/sudoers
+		sh "$1"
+		test "$(stat -c '%u:%g:%a' /usr/local/libexec/pi-sudo-prompt/pi-secret-broker)" = '0:0:755'
+		test "$(stat -c '%u:%g:%a' /etc/sudoers.d/pi-sudo-prompt)" = '0:0:440'
+		test "$(stat -c '%u:%g:%a' /etc/pi-sudo-prompt/allowlist)" = '0:0:644'
+		! grep -vE '^([[:space:]]*#.*|[[:space:]]*)$' /etc/pi-sudo-prompt/allowlist
+		grep -q 'keepassxc-cli show -q -t' /etc/pi-sudo-prompt/allowlist
+		printf '/my/consumer --safe\\n' > /etc/pi-sudo-prompt/allowlist
+		printf '# outdated broker\\n' > /usr/local/libexec/pi-sudo-prompt/pi-secret-broker
+		sh "$1"
+		cmp "$(dirname "$1")/pi-secret-broker" /usr/local/libexec/pi-sudo-prompt/pi-secret-broker
+		test "$(cat /etc/pi-sudo-prompt/allowlist)" = '/my/consumer --safe'
+		visudo -c
+	`, "installer-test", installer], { encoding: "utf8", timeout: 10000 });
+	assert.equal(result.status, 0, result.stderr + result.stdout);
+});
+
 test("installer is valid sh", () => {
 	const result = spawnSync("sh", ["-n", installer], { encoding: "utf8" });
 	assert.equal(result.status, 0, result.stderr);
