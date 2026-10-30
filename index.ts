@@ -221,6 +221,12 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 	const template = createBashToolDefinition(process.cwd(), { spawnHook: injectAskpass });
 	pi.registerTool({
 		...template,
+		// Tell the agent the bridge exists; otherwise it assumes sudo can't prompt and gives up.
+		promptGuidelines: [
+			...(template.promptGuidelines ?? []),
+			"sudo works in bash: in the interactive TUI, a plain `sudo <cmd>` opens a masked password modal for the user (pi-sudo-prompt, via SUDO_ASKPASS). Just run the command; never ask the user for the password and never pipe it.",
+			"Do not probe sudo with `sudo -n` (non-interactive): it fails without cached credentials even though a normal `sudo` would prompt. Use a timeout long enough for the user to type (e.g. 120s).",
+		],
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			let commandPrefix: string | undefined;
 			let shellPath: string | undefined;
