@@ -29,7 +29,7 @@ export const SUDO_FUNCTION =
 
 export type Message = Record<string, unknown> & { signature?: string };
 
-function canonical(message: Message): string {
+export function canonical(message: Message): string {
 	const { signature: _ignored, ...rest } = message;
 	return JSON.stringify(
 		Object.keys(rest)
