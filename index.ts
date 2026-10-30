@@ -41,6 +41,7 @@ import {
 	shellQuote,
 	validateRequester,
 } from "./protocol.ts";
+import { classifySecretRequest, readTrustedAllowlist } from "./allowlist.ts";
 import { PROTOCOL_VERSION, type SecretRequest, secretRunScript, validateSecretRequest } from "./secret.ts";
 import { createRequestServer, ModalQueue, type Reply, type RequestHandler } from "./socket.ts";
 
@@ -151,10 +152,11 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 		modals
 			.run(async () => {
 				if (!uiContext) return deny("no interactive pi TUI to show the secret prompt");
+				const classification = classifySecretRequest(argv, readTrustedAllowlist());
 				const secret = await showModal(
 					socket,
 					(tui, theme, keybindings, done) =>
-						new SecretRequestModal(tui, theme, keybindings, { argv, label, timeoutMs: PROMPT_TIMEOUT_MS }, done),
+						new SecretRequestModal(tui, theme, keybindings, { argv, label, classification, timeoutMs: PROMPT_TIMEOUT_MS }, done),
 				);
 				if (secret === undefined) deny("secret request cancelled or timed out");
 				else reply({ type: "secret_response", id, secret });

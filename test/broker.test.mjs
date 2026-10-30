@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -93,6 +93,25 @@ test("the consumer gets the secret on stdin and it does not show up in the outpu
 	assert.equal(result.status, 0, result.stderr);
 	assert.equal(result.stdout.split(" ")[0], sha256(SECRET));
 	assert.ok(!result.stdout.includes(SECRET) && !result.stderr.includes(SECRET));
+});
+
+test("o argv mostrado e executado usa o caminho real, mesmo se o symlink mudar após o consentimento", { skip }, async () => {
+	const alias = join(dir, "consumer-alias");
+	symlinkSync("/bin/sh", alias);
+	answer = (message, reply) => {
+		assert.equal(message.argv[0], realpathSync("/bin/sh"));
+		unlinkSync(alias);
+		symlinkSync("/bin/false", alias);
+		reply({ type: "secret_response", id: message.id, secret: SECRET });
+	};
+	try {
+		const result = await secretRun([alias, "-c", "cat >/dev/null; printf resolved"]);
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(result.stdout, "resolved");
+	} finally {
+		answer = "secret";
+		unlinkSync(alias);
+	}
 });
 
 test("no cache: every call opens the modal", { skip }, async () => {
