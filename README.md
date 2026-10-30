@@ -78,10 +78,37 @@ A senha nunca entra no contexto do modelo nem nos registros da sessão. Além di
 
 **O que não é coberto:** um agente que **altere arquivos que pertencem a você** (`askpass.mjs`, `protocol.mjs`, a extensão em `~/.pi/agent/...`, o binário `node` do nvm). Qualquer código que rode como o seu usuário pode ser trocado por outro processo do seu usuário. Isso só se resolve com um auxiliar de dono root, previsto como modo blindado opcional numa versão futura. Até lá: o modal mostra o comando que será autorizado, confira antes de digitar, e desconfie de transcripts em que o agente edita arquivos da extensão ou do node.
 
+## Segredos que não são do sudo (`pi-secret-run`)
+
+Para um **segredo durável** de outro consumidor (senha mestra do `keepassxc-cli`, chave de API, token de login), o agente roda:
+
+```bash
+pi-secret-run --label "senha mestra do KeePassXC" -- keepassxc-cli show -q -t db.kdbx npm
+```
+
+O pi abre o modal **Pedido de segredo**, com título diferente do modal do sudo. O modal mostra o argv real lido pelo broker, a descrição do agente marcada como "não verificada" e o aviso vermelho "este comando pode mostrar ao agente o que você digitar". O segredo digitado vai para o stdin do comando. O agente vê só a saída do comando (um OTP, por exemplo). Não há cache: cada chamada abre o modal. Decisões em [`docs/adr/0002-broker-root-para-segredos-duraveis.md`](docs/adr/0002-broker-root-para-segredos-duraveis.md).
+
+**Instalação do broker (uma vez, como root).** Leia o script antes de rodar:
+
+```bash
+sudo sh ~/.pi/agent/<caminho do pacote>/broker/install.sh   # a mensagem de recusa do pi-secret-run mostra o caminho exato
+```
+
+Ele instala `/usr/local/libexec/pi-sudo-prompt/pi-secret-broker` (Python, só biblioteca padrão, dono root) e a regra `/etc/sudoers.d/pi-sudo-prompt` (`NOPASSWD` só para o broker), validada com `visudo -c`. Rode de novo depois de atualizar o pacote: a extensão recusa um broker de outra versão do protocolo.
+
+**Como funciona:** `pi-secret-run` chama o broker por `sudo -n`. O broker, como root, pede o segredo à extensão pelo socket da sessão e prova que é ele com um arquivo em `/run/pi-sudo-prompt` que só root pode criar. A extensão confere euid 0, o argv exato `/usr/bin/python3 -I <broker> …` e os arquivos com dono root. Depois o broker cria um pipe como root (`0600`), executa o comando com o seu uid/gid (nunca root) e escreve o segredo no stdin dele. O segredo nunca vai por variável de ambiente.
+
+**Recusas** (código de saída diferente de zero, com o motivo): broker ausente (a mensagem mostra como instalar), versão divergente, fora do TUI, sistema que não é Linux, modal cancelado ou expirado. Não há modo sem root.
+
+**Limites da garantia:**
+- O aviso vermelho aparece sempre nesta versão. Se você aprovar um comando que ecoa o que recebe (`cat`, por exemplo), o segredo vai para o agente por escolha sua. Leia o comando no modal.
+- O comando roda com o seu uid, então a memória dele fica ao alcance do ptrace: com `kernel.yama.ptrace_scope=0`, por qualquer processo seu; com `ptrace_scope=1`, por um processo seu que seja ancestral dele (um programa que lança o `pi-secret-run` e depois depura o comando). A garantia contra reabrir o pipe e ler o `environ` não cobre esse caso.
+
 ## Desenvolvimento
 
 ```bash
-npm test                      # protocolo, auxiliar, função sudo() e ataques de exfiltração (sudo real, sem autenticar)
+npm test                      # protocolo, auxiliar, função sudo(), ataques de exfiltração (sudo real, sem autenticar)
+                              # e pi-secret-run → broker real (pulados se o broker não estiver instalado)
 pi install ./                 # carrega a cópia local
 ```
 
