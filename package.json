@@ -21,6 +21,7 @@
     "modal.ts",
     "askpass.mjs",
     "protocol.ts",
+    "socket.ts",
     "README.md",
     "LICENSE",
     "docs/adr"

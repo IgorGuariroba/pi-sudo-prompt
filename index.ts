@@ -11,7 +11,7 @@
 
 import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type Server, type Socket } from "node:net";
+import type { Server, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,10 +35,9 @@ import {
 	readCmdline,
 	SUDO_FUNCTION,
 	shellQuote,
-	sign,
 	validateRequester,
-	verify,
 } from "./protocol.ts";
+import { createRequestServer, ModalQueue, type Reply, type RequestHandler } from "./socket.ts";
 
 const PROMPT_TIMEOUT_MS = 120_000;
 const MAX_ATTEMPTS = 3; // sudoers passwd_tries default
@@ -68,7 +67,7 @@ function displayCommand(sudoPid: number): string {
 export default function sudoPrompt(pi: ExtensionAPI) {
 	let bridge: Bridge | undefined;
 	let uiContext: ExtensionContext | undefined;
-	let queue: Promise<void> = Promise.resolve();
+	const modals = new ModalQueue();
 
 	function injectAskpass(context: BashSpawnContext): BashSpawnContext {
 		if (!bridge) return context;
@@ -84,14 +83,9 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 		};
 	}
 
-	function reply(socket: Socket, message: Record<string, unknown>): void {
-		if (!bridge || socket.destroyed) return;
-		socket.end(`${JSON.stringify(sign(bridge.secret, message))}\n`);
-	}
-
-	async function askUser(socket: Socket, id: string, prompt: string, sudoPid: number, attempt: number) {
+	async function askUser(socket: Socket, reply: Reply, id: string, prompt: string, sudoPid: number, attempt: number) {
 		const ctx = uiContext;
-		if (!bridge || !ctx || socket.destroyed) return reply(socket, { type: "password_denied", id, reason: "no UI" });
+		if (!bridge || !ctx || socket.destroyed) return reply({ type: "password_denied", id, reason: "no UI" });
 
 		let modal: SudoPromptModal | undefined;
 		const onClose = () => modal?.cancel();
@@ -109,26 +103,20 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 				if (socket.destroyed) modal.cancel();
 				return modal;
 			});
-			if (password === undefined) reply(socket, { type: "password_denied", id, reason: "authentication cancelled" });
-			else reply(socket, { type: "password_response", id, password });
+			if (password === undefined) reply({ type: "password_denied", id, reason: "authentication cancelled" });
+			else reply({ type: "password_response", id, password });
 		} finally {
 			socket.off("close", onClose);
 			if (modal) bridge?.openModals.delete(modal);
 		}
 	}
 
-	function handleRequest(socket: Socket, line: string): void {
+	/** sudo, via the askpass helper (ADR 0001). */
+	const handlePasswordRequest: RequestHandler = (message, reply, socket) => {
 		if (!bridge) return void socket.destroy();
-		let message: any;
-		try {
-			message = JSON.parse(line);
-		} catch {
-			return void socket.destroy();
-		}
-		const id = typeof message?.id === "string" ? message.id : "";
-		const deny = (reason: string) => reply(socket, { type: "password_denied", id, reason });
+		const { id } = message;
+		const deny = (reason: string) => reply({ type: "password_denied", id, reason });
 
-		if (!verify(bridge.secret, message) || message.type !== "password_request") return deny("bad signature");
 		if (Math.abs(Date.now() - Number(message.ts)) > MAX_SKEW_MS) return deny("stale request");
 
 		// Server-side re-check: the requester must be the genuine askpass helper, child of a root sudo.
@@ -150,8 +138,8 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 		bridge.attempts.set(sudoPid, attempt);
 
 		const prompt = typeof message.prompt === "string" ? message.prompt : "Password:";
-		queue = queue.then(() => askUser(socket, id, prompt, sudoPid, attempt)).catch(() => deny("prompt failed"));
-	}
+		modals.run(() => askUser(socket, reply, id, prompt, sudoPid, attempt)).catch(() => deny("prompt failed"));
+	};
 
 	function startBridge(): void {
 		if (bridge) return;
@@ -163,24 +151,9 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 			mode: 0o700,
 		});
 
-		const server = createServer((socket) => {
-			socket.setEncoding("utf8");
-			let buffer = "";
-			let handled = false;
-			socket.on("data", (chunk: string) => {
-				if (handled) return;
-				buffer += chunk;
-				const newline = buffer.indexOf("\n");
-				if (newline === -1) {
-					if (buffer.length > 64 * 1024) socket.destroy();
-					return;
-				}
-				const line = buffer.slice(0, newline);
-				buffer = "";
-				handled = true;
-				handleRequest(socket, line);
-			});
-			socket.on("error", () => {});
+		const server = createRequestServer({
+			secret: () => bridge?.secret,
+			handlers: { password_request: handlePasswordRequest },
 		});
 		server.listen(socketPath);
 		server.unref();
