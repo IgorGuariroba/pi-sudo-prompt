@@ -12,11 +12,11 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname } from "node:path";
-import type { SecretClassification } from "./allowlist.ts";
+import { resolveConsumerArgv, type SecretClassification } from "./allowlist.ts";
 import { canonical, MAX_SKEW_MS, type Message, procInfo, readCmdline, shellQuote } from "./protocol.ts";
 
 /** Bump together with PROTOCOL_VERSION in broker/pi-secret-broker. */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const BROKER_PATH = "/usr/local/libexec/pi-sudo-prompt/pi-secret-broker";
 export const BROKER_INTERPRETER = "/usr/bin/python3";
 /** Root-owned directory where the broker proves a request is its own (see validateSecretRequest). */
@@ -143,7 +143,7 @@ export function validateSecretRequest(
 	const cmdline = readCmdline(pid as number);
 	// The broker resolves argv[0] before requesting consent and executes that same path.
 	try {
-		if (cmdline[5] === "--" && cmdline[6]) cmdline[6] = realpathSync(cmdline[6]);
+		if (cmdline[5] === "--" && cmdline[6]) cmdline[6] = resolveConsumerArgv(cmdline.slice(6))[0];
 	} catch {
 		return "cannot resolve the consumer executable";
 	}
