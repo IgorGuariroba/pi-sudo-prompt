@@ -63,3 +63,88 @@ exec sudo -n -- "$BROKER" --label "$label" -- "$cmd" "$@"
 export function requestDigest(message: Message): string {
 	return createHash("sha256").update(canonical(message)).digest("hex");
 }
+
+/** File (and every directory above it) owned by root and not writable by group/others. */
+function rootOwned(path: string): boolean {
+	try {
+		let current = realpathSync(path);
+		for (;;) {
+			const info = statSync(current);
+			if (info.uid !== 0 || (info.mode & 0o022) !== 0) return false;
+			if (current === "/") return true;
+			current = dirname(current);
+		}
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * The broker proves the request is its own: before connecting it writes, as root, a file named
+ * after the request's random ticket in TICKET_DIR (root-owned, not listable) holding the
+ * request digest. A process of the user can neither create such a file nor learn the ticket of
+ * a real broker, so it cannot reuse a running broker's pid to receive the secret.
+ */
+function ticketMatches(message: Message & { ticket: string }): boolean {
+	try {
+		const dir = lstatSync(TICKET_DIR);
+		if (!dir.isDirectory() || dir.uid !== 0 || (dir.mode & 0o022) !== 0) return false;
+		const path = `${TICKET_DIR}/${message.ticket}`;
+		const file = lstatSync(path);
+		if (!file.isFile() || file.uid !== 0 || file.nlink !== 1 || (file.mode & 0o022) !== 0) return false;
+		return readFileSync(path, "utf8") === requestDigest(message);
+	} catch {
+		return false;
+	}
+}
+
+export interface SecretRequest extends Message {
+	id: string;
+	pid: number;
+	version: number;
+	argv: string[];
+	label: string;
+	ticket: string;
+	ts: number;
+}
+
+/**
+ * Server-side check of a secret request (signature already verified by socket.ts). Returns
+ * undefined when it comes from the genuine root broker, otherwise the reason to deny.
+ * Accepted tickets are added to `usedTickets` so a request is never honored twice.
+ */
+export function validateSecretRequest(
+	message: Message,
+	options: { expectedVersion: number; usedTickets: Set<string>; reinstallHint?: string; now?: number },
+): string | undefined {
+	const { expectedVersion, usedTickets } = options;
+	if (Math.abs((options.now ?? Date.now()) - Number(message.ts)) > MAX_SKEW_MS) return "stale request";
+	if (message.version !== expectedVersion) {
+		const hint = options.reinstallHint ? `: ${options.reinstallHint}` : "";
+		return `broker protocol version ${String(message.version)} does not match the extension (${expectedVersion}); reinstall the broker${hint}`;
+	}
+	const { pid, argv, label, ticket } = message;
+	if (
+		!Number.isInteger(pid) ||
+		!Array.isArray(argv) ||
+		argv.length === 0 ||
+		!argv.every((arg) => typeof arg === "string") ||
+		typeof label !== "string" ||
+		typeof ticket !== "string" ||
+		!/^[0-9a-f]{64}$/.test(ticket)
+	) {
+		return "malformed secret request";
+	}
+
+	const info = procInfo(pid as number);
+	if (!info || info.realUid !== 0 || info.effectiveUid !== 0) return "requester is not running as root (not the broker)";
+	const expected = [BROKER_INTERPRETER, "-I", BROKER_PATH, "--label", label, "--", ...(argv as string[])];
+	const cmdline = readCmdline(pid as number);
+	if (cmdline.length !== expected.length || cmdline.some((arg, i) => arg !== expected[i])) {
+		return "requester is not the installed broker";
+	}
+	if (!rootOwned(BROKER_PATH) || !rootOwned(BROKER_INTERPRETER)) return "broker or its interpreter is not root-owned";
+	if (usedTickets.has(ticket) || !ticketMatches(message as SecretRequest)) return "request not proven by the broker";
+	usedTickets.add(ticket);
+	return undefined;
+}
