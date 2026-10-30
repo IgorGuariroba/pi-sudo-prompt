@@ -12,6 +12,7 @@ set -eu
 
 BROKER=/usr/local/libexec/pi-sudo-prompt/pi-secret-broker
 SUDOERS=/etc/sudoers.d/pi-sudo-prompt
+ALLOWLIST=/etc/pi-sudo-prompt/allowlist
 SOURCE=$(dirname "$0")/pi-secret-broker
 
 fail() { printf 'install: %s\n' "$1" >&2; exit 1; }
@@ -42,5 +43,28 @@ visudo -c -f "$tmp" >/dev/null || fail "generated sudoers rule is invalid; nothi
 mv -f "$tmp" "$SUDOERS"
 trap - EXIT
 visudo -c >/dev/null || fail "sudoers is invalid after the change; remove $SUDOERS"
+
+# Start with no approved consumers. Never overwrite an administrator's existing file
+# (including a symlink). Publish with ln, which also refuses a destination created meanwhile.
+install -d -o root -g root -m 0755 "$(dirname "$ALLOWLIST")"
+if [ ! -e "$ALLOWLIST" ] && [ ! -L "$ALLOWLIST" ]; then
+    tmp=$(mktemp "$(dirname "$ALLOWLIST")/.allowlist.XXXXXX")
+    trap 'rm -f "$tmp"' EXIT
+    cat >"$tmp" <<'EOF'
+# pi-sudo-prompt allowlist: no consumer is approved by default.
+# Edit with: sudoedit /etc/pi-sudo-prompt/allowlist
+# Each line: absolute REAL executable path, followed by whitespace-separated arguments.
+# <name> matches exactly one nonempty argument, never an option beginning with '-'.
+# Examples (uncomment only after reviewing the executable and its argument format):
+# /usr/bin/keepassxc-cli show -q -t <db> <entrada>
+# /usr/bin/gh auth login --with-token
+# /usr/bin/docker login --password-stdin <registry>
+EOF
+    chown root:root "$tmp"
+    chmod 0644 "$tmp"
+    ln "$tmp" "$ALLOWLIST" || fail "allowlist already exists; refusing to overwrite it"
+    rm -f "$tmp"
+    trap - EXIT
+fi
 
 printf 'pi-secret-broker installed at %s (sudoers rule %s).\n' "$BROKER" "$SUDOERS"
