@@ -58,3 +58,8 @@ sudo -n -l -- "$BROKER" >/dev/null 2>&1 ||
 exec sudo -n -- "$BROKER" --label "$label" -- "$cmd" "$@"
 `;
 }
+
+/** sha256 of the signed fields: what the broker writes in its ticket file. */
+export function requestDigest(message: Message): string {
+	return createHash("sha256").update(canonical(message)).digest("hex");
+}
