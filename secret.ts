@@ -148,3 +148,36 @@ export function validateSecretRequest(
 	usedTickets.add(ticket);
 	return undefined;
 }
+
+export const SECRET_MODAL_TITLE = "Pedido de segredo (pi-secret-run)";
+export const UNVERIFIED_WARNING = "⚠ este comando pode mostrar ao agente o que você digitar";
+
+/** Escapes C0/C1 control characters so text from the agent cannot drive the terminal. */
+function visible(text: string): string {
+	return text.replace(/[\x00-\x1f\x7f-\x9f]/g, (ch) => `\\x${ch.charCodeAt(0).toString(16).padStart(2, "0")}`);
+}
+
+export function displayArgv(argv: string[]): string {
+	return visible(argv.map((arg) => (/^[\w@%+=:,./-]+$/.test(arg) ? arg : shellQuote(arg))).join(" "));
+}
+
+export interface ModalLine {
+	text: string;
+	style: "text" | "dim" | "error" | "label";
+}
+
+/** Text of the secret request modal. Always unverified in this phase: the allowlist comes later. */
+export function secretModalContent(request: { argv: string[]; label: string }): { title: string; lines: ModalLine[] } {
+	return {
+		title: SECRET_MODAL_TITLE,
+		lines: [
+			{ text: "Comando (lido pelo broker root):", style: "dim" },
+			{ text: displayArgv(request.argv), style: "text" },
+			{ text: "", style: "text" },
+			{ text: "Descrição do agente (não verificada):", style: "dim" },
+			{ text: visible(request.label) || "(vazia)", style: "label" },
+			{ text: "", style: "text" },
+			{ text: UNVERIFIED_WARNING, style: "error" },
+		],
+	};
+}

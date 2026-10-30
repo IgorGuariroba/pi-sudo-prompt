@@ -22,6 +22,8 @@
     "askpass.mjs",
     "protocol.ts",
     "socket.ts",
+    "secret.ts",
+    "broker",
     "README.md",
     "LICENSE",
     "docs/adr"

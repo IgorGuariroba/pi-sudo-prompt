@@ -9,6 +9,8 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
+import { SUDO_MODAL_TITLE } from "./protocol.ts";
+import { secretModalContent } from "./secret.ts";
 
 export interface SudoPromptRequest {
 	/** Prompt text sudo passed to the askpass helper, e.g. "[sudo] senha para movida: ". */
@@ -25,11 +27,11 @@ const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
 
 /**
- * Masked password modal shaped like Cursor's "Sudo Authentication Required".
- * Resolves `done(password)` on Enter, `done(undefined)` on Escape or timeout.
- * The password lives only in this component's memory and is never rendered.
+ * Masked input modal. Resolves `done(password)` on Enter, `done(undefined)` on Escape or
+ * timeout. The password lives only in this component's memory and is never rendered.
+ * Subclasses only provide the body text.
  */
-export class SudoPromptModal implements Component, Focusable {
+abstract class MaskedPromptModal implements Component, Focusable {
 	focused = false;
 	private password = "";
 	private inPaste = false;
@@ -40,12 +42,12 @@ export class SudoPromptModal implements Component, Focusable {
 
 	constructor(
 		private readonly tui: TUI,
-		private readonly theme: Theme,
+		protected readonly theme: Theme,
 		private readonly keybindings: KeybindingsManager,
-		private readonly request: SudoPromptRequest,
+		timeoutMs: number,
 		private readonly done: (password: string | undefined) => void,
 	) {
-		this.deadline = Date.now() + request.timeoutMs;
+		this.deadline = Date.now() + timeoutMs;
 		this.timer = setInterval(() => {
 			if (Date.now() >= this.deadline) this.finish(undefined);
 			else this.tui.requestRender();
@@ -111,6 +113,9 @@ export class SudoPromptModal implements Component, Focusable {
 		this.tui.requestRender();
 	}
 
+	/** Lines above and below the password field; `clock` is the time left before auto-cancel. */
+	protected abstract body(clock: string): { before: string[]; after: string[] };
+
 	render(width: number): string[] {
 		const t = this.theme;
 		const border = (s: string) => t.fg("warning", s);
@@ -126,29 +131,8 @@ export class SudoPromptModal implements Component, Focusable {
 			return `${label}${t.fg("text", "•".repeat(Array.from(this.password).length))}${cursor}`;
 		})();
 
-		const body: string[] = [
-			"",
-			`🔐 ${t.bold("Sudo Authentication Required")}`,
-			"",
-			`${t.fg("dim", "Command:")} ${t.fg("text", this.request.command)}`,
-			"",
-			t.fg("text", this.request.prompt.trimEnd()),
-			"",
-		];
-		if (this.request.attempt > 1) {
-			body.push(
-				t.fg("error", `Incorrect password, try again (${this.request.attempt}/${this.request.maxAttempts})`),
-				"",
-			);
-		}
-		body.push(
-			passwordLine,
-			"",
-			t.fg("dim", `Press Enter to submit, Escape to cancel · auto-cancel in ${clock}`),
-			"",
-			t.italic(t.fg("dim", "Your password is secure and will not be visible to the AI model.")),
-			"",
-		);
+		const { before, after } = this.body(clock);
+		const body = [...before, passwordLine, ...after];
 
 		const lines = [border(`╭${"─".repeat(inner + 2)}╮`)];
 		for (const line of body) {
@@ -158,6 +142,86 @@ export class SudoPromptModal implements Component, Focusable {
 		}
 		lines.push(border(`╰${"─".repeat(inner + 2)}╯`));
 		return lines;
+	}
+}
+
+/** Masked password modal shaped like Cursor's "Sudo Authentication Required". */
+export class SudoPromptModal extends MaskedPromptModal {
+	constructor(
+		tui: TUI,
+		theme: Theme,
+		keybindings: KeybindingsManager,
+		private readonly request: SudoPromptRequest,
+		done: (password: string | undefined) => void,
+	) {
+		super(tui, theme, keybindings, request.timeoutMs, done);
+	}
+
+	protected body(clock: string) {
+		const t = this.theme;
+		const before: string[] = [
+			"",
+			`🔐 ${t.bold(SUDO_MODAL_TITLE)}`,
+			"",
+			`${t.fg("dim", "Command:")} ${t.fg("text", this.request.command)}`,
+			"",
+			t.fg("text", this.request.prompt.trimEnd()),
+			"",
+		];
+		if (this.request.attempt > 1) {
+			before.push(
+				t.fg("error", `Incorrect password, try again (${this.request.attempt}/${this.request.maxAttempts})`),
+				"",
+			);
+		}
+		const after = [
+			"",
+			t.fg("dim", `Press Enter to submit, Escape to cancel · auto-cancel in ${clock}`),
+			"",
+			t.italic(t.fg("dim", "Your password is secure and will not be visible to the AI model.")),
+			"",
+		];
+		return { before, after };
+	}
+}
+
+export interface SecretRequestView {
+	/** Real argv of the consumer, read by the root broker. */
+	argv: string[];
+	/** Description written by the agent (not verified). */
+	label: string;
+	timeoutMs: number;
+}
+
+/** Secret request modal (pi-secret-run, ADR 0002). Its title is never the sudo one. */
+export class SecretRequestModal extends MaskedPromptModal {
+	constructor(
+		tui: TUI,
+		theme: Theme,
+		keybindings: KeybindingsManager,
+		private readonly request: SecretRequestView,
+		done: (secret: string | undefined) => void,
+	) {
+		super(tui, theme, keybindings, request.timeoutMs, done);
+	}
+
+	protected body(clock: string) {
+		const t = this.theme;
+		const { title, lines } = secretModalContent(this.request);
+		const styled = lines.map(({ text, style }) => {
+			if (style === "error") return t.bold(t.fg("error", text));
+			if (style === "label") return t.italic(t.fg("text", text));
+			return t.fg(style, text);
+		});
+		const before = ["", `🔑 ${t.bold(title)}`, "", ...styled, ""];
+		const after = [
+			"",
+			t.fg("dim", `Enter envia, Escape cancela · cancela sozinho em ${clock}`),
+			"",
+			t.italic(t.fg("dim", "O segredo vai direto para o comando; o modelo não o vê.")),
+			"",
+		];
+		return { before, after };
 	}
 }
 

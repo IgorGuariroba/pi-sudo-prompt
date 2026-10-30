@@ -31,7 +31,7 @@ test("helper and pi agree that a regular file/pipe is not sudo's pipe", () => {
 // whole process. A relative non-.ts import from the extension side mixes new and stale code
 // (seen as "launcherScript is not a function" after /reload).
 test("extension side only imports relative .ts modules", () => {
-	for (const file of ["index.ts", "modal.ts", "protocol.ts", "socket.ts"]) {
+	for (const file of ["index.ts", "modal.ts", "protocol.ts", "secret.ts", "socket.ts"]) {
 		const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 		for (const [, specifier] of source.matchAll(/from\s+["'](\.[^"']+)["']/g)) {
 			assert.match(specifier, /\.ts$/, `${file} imports ${specifier}; only .ts is reloaded by /reload`);
