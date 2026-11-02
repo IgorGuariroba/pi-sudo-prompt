@@ -7,11 +7,15 @@
  * UI → socket → helper → sudo's stdin pipe. It never enters tool output or the session.
  *
  * See docs/adr/0001-askpass-socket.md for why askpass + socket instead of PTY scraping.
+ *
+ * Secret requests for consumers other than sudo (`pi-secret-run`, ADR 0002) use the same
+ * socket: the root broker asks, the extension checks it is the genuine broker and shows the
+ * secret request modal, the broker hands the secret to the consumer's stdin.
  */
 
 import { randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type Server, type Socket } from "node:net";
+import type { Server, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,7 +29,9 @@ import {
 	getAgentDir,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { SudoPromptModal } from "./modal.ts";
+import { installationHint, registerInstallCommand } from "./install.ts";
+import { createAllowCommand } from "./allow-command.ts";
+import { SecretRequestModal, SudoPromptModal } from "./modal.ts";
 import {
 	ENV_SECRET,
 	ENV_SOCKET,
@@ -35,16 +41,19 @@ import {
 	readCmdline,
 	SUDO_FUNCTION,
 	shellQuote,
-	sign,
 	validateRequester,
-	verify,
 } from "./protocol.ts";
+import { classifySecretRequest, readTrustedAllowlist } from "./allowlist.ts";
+import { PROTOCOL_VERSION, type SecretRequest, secretRunScript, validateSecretRequest } from "./secret.ts";
+import { createRequestServer, ModalQueue, type Reply, type RequestHandler } from "./socket.ts";
 
 const PROMPT_TIMEOUT_MS = 120_000;
 const MAX_ATTEMPTS = 3; // sudoers passwd_tries default
 
 const extensionDir = dirname(fileURLToPath(import.meta.url));
 const helperScript = join(extensionDir, "askpass.mjs");
+const installer = join(extensionDir, "broker", "install.sh");
+const INSTALL_HINT = installationHint(installer);
 
 interface Bridge {
 	dir: string;
@@ -53,7 +62,9 @@ interface Bridge {
 	secret: string;
 	server: Server;
 	attempts: Map<number, number>;
-	openModals: Set<SudoPromptModal>;
+	/** Broker tickets already honored: a secret request is never answered twice. */
+	tickets: Set<string>;
+	openModals: Set<{ cancel(): void }>;
 }
 
 function displayCommand(sudoPid: number): string {
@@ -67,16 +78,35 @@ function displayCommand(sudoPid: number): string {
 
 export default function sudoPrompt(pi: ExtensionAPI) {
 	let bridge: Bridge | undefined;
+	/** Holds `pi-secret-run`, on the PATH in every mode so that it can refuse with a reason. */
+	let binDir: string | undefined;
 	let uiContext: ExtensionContext | undefined;
-	let queue: Promise<void> = Promise.resolve();
+	const modals = new ModalQueue();
+
+	async function runUserCommand(command: string, cwd: string) {
+		if (!bridge || !uiContext) throw new Error("no interactive sudo bridge");
+		const injected = injectAskpass({ command, cwd, env: process.env });
+		// Local execution, not a tool call/chat message; existing sudo modal, no output persisted.
+		return createLocalBashOperations().exec(injected.command, injected.cwd, {
+			env: injected.env, timeout: 180, onData() {},
+		});
+	}
+	const allowCommand = createAllowCommand({ run: runUserCommand });
+
+	function withSecretRun(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+		if (!binDir) return env;
+		const path = env.PATH ?? process.env.PATH ?? "";
+		return { ...env, PATH: [binDir, path].filter(Boolean).join(delimiter) };
+	}
 
 	function injectAskpass(context: BashSpawnContext): BashSpawnContext {
-		if (!bridge) return context;
+		const env = withSecretRun(context.env);
+		if (!bridge) return { ...context, env };
 		return {
 			command: `${SUDO_FUNCTION}\n${context.command}`,
 			cwd: context.cwd,
 			env: {
-				...context.env,
+				...env,
 				SUDO_ASKPASS: bridge.askpassPath,
 				[ENV_SOCKET]: bridge.socketPath,
 				[ENV_SECRET]: bridge.secret,
@@ -84,51 +114,78 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 		};
 	}
 
-	function reply(socket: Socket, message: Record<string, unknown>): void {
-		if (!bridge || socket.destroyed) return;
-		socket.end(`${JSON.stringify(sign(bridge.secret, message))}\n`);
-	}
+	type ModalArgs = Parameters<Parameters<ExtensionContext["ui"]["custom"]>[0]>;
+	type ModalFactory = (
+		tui: ModalArgs[0],
+		theme: ModalArgs[1],
+		keybindings: ModalArgs[2],
+		done: (value: string | undefined) => void,
+	) => SudoPromptModal | SecretRequestModal;
 
-	async function askUser(socket: Socket, id: string, prompt: string, sudoPid: number, attempt: number) {
+	/** Shows a masked modal; closes it when the requester goes away. Undefined = cancelled/no UI. */
+	async function showModal(socket: Socket, create: ModalFactory): Promise<string | undefined> {
 		const ctx = uiContext;
-		if (!bridge || !ctx || socket.destroyed) return reply(socket, { type: "password_denied", id, reason: "no UI" });
-
-		let modal: SudoPromptModal | undefined;
+		if (!bridge || !ctx || socket.destroyed) return undefined;
+		let modal: SudoPromptModal | SecretRequestModal | undefined;
 		const onClose = () => modal?.cancel();
 		socket.once("close", onClose);
 		try {
-			const password = await ctx.ui.custom<string | undefined>((tui, theme, keybindings, done) => {
-				modal = new SudoPromptModal(
-					tui,
-					theme,
-					keybindings,
-					{ prompt, command: displayCommand(sudoPid), attempt, maxAttempts: MAX_ATTEMPTS, timeoutMs: PROMPT_TIMEOUT_MS },
-					done,
-				);
+			return await ctx.ui.custom<string | undefined>((tui, theme, keybindings, done) => {
+				modal = create(tui, theme, keybindings, done);
 				bridge?.openModals.add(modal);
 				if (socket.destroyed) modal.cancel();
 				return modal;
 			});
-			if (password === undefined) reply(socket, { type: "password_denied", id, reason: "authentication cancelled" });
-			else reply(socket, { type: "password_response", id, password });
 		} finally {
 			socket.off("close", onClose);
 			if (modal) bridge?.openModals.delete(modal);
 		}
 	}
 
-	function handleRequest(socket: Socket, line: string): void {
-		if (!bridge) return void socket.destroy();
-		let message: any;
-		try {
-			message = JSON.parse(line);
-		} catch {
-			return void socket.destroy();
-		}
-		const id = typeof message?.id === "string" ? message.id : "";
-		const deny = (reason: string) => reply(socket, { type: "password_denied", id, reason });
+	async function askUser(socket: Socket, reply: Reply, id: string, prompt: string, sudoPid: number, attempt: number) {
+		if (!uiContext) return reply({ type: "password_denied", id, reason: "no UI" });
+		const request = { prompt, command: displayCommand(sudoPid), attempt, maxAttempts: MAX_ATTEMPTS, timeoutMs: PROMPT_TIMEOUT_MS };
+		const password = await showModal(socket, (tui, theme, keybindings, done) => new SudoPromptModal(tui, theme, keybindings, request, done));
+		if (password === undefined) reply({ type: "password_denied", id, reason: "authentication cancelled" });
+		else reply({ type: "password_response", id, password });
+	}
 
-		if (!verify(bridge.secret, message) || message.type !== "password_request") return deny("bad signature");
+	/** pi-secret-run, via the root broker (ADR 0002). No cache: every request opens the modal. */
+	const handleSecretRequest: RequestHandler = (message, reply, socket) => {
+		if (!bridge) return void socket.destroy();
+		const { id } = message;
+		const deny = (reason: string) => reply({ type: "secret_denied", id, reason });
+		const invalid = validateSecretRequest(message, {
+			expectedVersion: PROTOCOL_VERSION,
+			usedTickets: bridge.tickets,
+			reinstallHint: INSTALL_HINT,
+		});
+		if (invalid) return deny(invalid);
+		const { argv, label } = message as SecretRequest;
+		modals
+			.run(async () => {
+				if (!uiContext) return deny("no interactive pi TUI to show the secret prompt");
+				const classification = classifySecretRequest(argv, readTrustedAllowlist());
+				const secret = await showModal(
+					socket,
+					(tui, theme, keybindings, done) => {
+						const modal = new SecretRequestModal(tui, theme, keybindings, { argv, label, classification, timeoutMs: PROMPT_TIMEOUT_MS }, done);
+						allowCommand.observe(argv, classification);
+						return modal;
+					},
+				);
+				if (secret === undefined) deny("secret request cancelled or timed out");
+				else reply({ type: "secret_response", id, secret });
+			})
+			.catch(() => deny("prompt failed"));
+	};
+
+	/** sudo, via the askpass helper (ADR 0001). */
+	const handlePasswordRequest: RequestHandler = (message, reply, socket) => {
+		if (!bridge) return void socket.destroy();
+		const { id } = message;
+		const deny = (reason: string) => reply({ type: "password_denied", id, reason });
+
 		if (Math.abs(Date.now() - Number(message.ts)) > MAX_SKEW_MS) return deny("stale request");
 
 		// Server-side re-check: the requester must be the genuine askpass helper, child of a root sudo.
@@ -150,8 +207,8 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 		bridge.attempts.set(sudoPid, attempt);
 
 		const prompt = typeof message.prompt === "string" ? message.prompt : "Password:";
-		queue = queue.then(() => askUser(socket, id, prompt, sudoPid, attempt)).catch(() => deny("prompt failed"));
-	}
+		modals.run(() => askUser(socket, reply, id, prompt, sudoPid, attempt)).catch(() => deny("prompt failed"));
+	};
 
 	function startBridge(): void {
 		if (bridge) return;
@@ -163,24 +220,9 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 			mode: 0o700,
 		});
 
-		const server = createServer((socket) => {
-			socket.setEncoding("utf8");
-			let buffer = "";
-			let handled = false;
-			socket.on("data", (chunk: string) => {
-				if (handled) return;
-				buffer += chunk;
-				const newline = buffer.indexOf("\n");
-				if (newline === -1) {
-					if (buffer.length > 64 * 1024) socket.destroy();
-					return;
-				}
-				const line = buffer.slice(0, newline);
-				buffer = "";
-				handled = true;
-				handleRequest(socket, line);
-			});
-			socket.on("error", () => {});
+		const server = createRequestServer({
+			secret: () => bridge?.secret,
+			handlers: { password_request: handlePasswordRequest, secret_request: handleSecretRequest },
 		});
 		server.listen(socketPath);
 		server.unref();
@@ -192,6 +234,7 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 			secret,
 			server,
 			attempts: new Map(),
+			tickets: new Set(),
 			openModals: new Set(),
 		};
 	}
@@ -205,7 +248,14 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 		rmSync(current.dir, { recursive: true, force: true });
 	}
 
+	function createBinDir(): void {
+		if (binDir) return;
+		binDir = mkdtempSync(join(process.env.XDG_RUNTIME_DIR || tmpdir(), "pi-secret-run-")); // 0700
+		writeFileSync(join(binDir, "pi-secret-run"), secretRunScript({ installHint: INSTALL_HINT }), { mode: 0o700 });
+	}
+
 	pi.on("session_start", (_event, ctx) => {
+		createBinDir();
 		// Custom terminal components exist only in the interactive TUI (not print/json/RPC).
 		if (ctx.mode !== "tui" || process.platform !== "linux") return;
 		uiContext = ctx;
@@ -214,7 +264,16 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", () => {
 		uiContext = undefined;
+		allowCommand.reset();
 		stopBridge();
+		if (binDir) rmSync(binDir, { recursive: true, force: true });
+		binDir = undefined;
+	});
+
+	registerInstallCommand(pi, {
+		installer,
+		run: runUserCommand,
+		allow: allowCommand.handler,
 	});
 
 	// Agent bash tool: same as the built-in, plus the askpass environment.
@@ -226,6 +285,7 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 			...(template.promptGuidelines ?? []),
 			"sudo works in bash: in the interactive TUI, a plain `sudo <cmd>` opens a masked password modal for the user (pi-sudo-prompt, via SUDO_ASKPASS). Just run the command; never ask the user for the password and never pipe it.",
 			"Do not probe sudo with `sudo -n` (non-interactive): it fails without cached credentials even though a normal `sudo` would prompt. Use a timeout long enough for the user to type (e.g. 120s).",
+			'Secrets other than the sudo password (vault master password, API key, login token): run `pi-secret-run --label "<what it is for>" -- <cmd> <args>`. In the interactive TUI it opens a masked secret prompt for the user and a root broker feeds the secret to <cmd> on stdin (e.g. `pi-secret-run --label "KeePassXC master password" -- keepassxc-cli show -q -t db.kdbx npm`). Never ask the user to paste a secret in the chat. If it refuses (no broker, no TUI, cancelled), tell the user why instead of working around it.',
 		],
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			let commandPrefix: string | undefined;
@@ -244,7 +304,7 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 
 	// User `!` / `!!` commands.
 	pi.on("user_bash", (_event, ctx) => {
-		if (!bridge) return;
+		if (!bridge && !binDir) return;
 		let shellPath: string | undefined;
 		try {
 			shellPath = SettingsManager.create(ctx.cwd, getAgentDir(), { projectTrusted: ctx.isProjectTrusted() }).getShellPath();

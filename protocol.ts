@@ -29,7 +29,7 @@ export const SUDO_FUNCTION =
 
 export type Message = Record<string, unknown> & { signature?: string };
 
-function canonical(message: Message): string {
+export function canonical(message: Message): string {
 	const { signature: _ignored, ...rest } = message;
 	return JSON.stringify(
 		Object.keys(rest)
@@ -189,3 +189,6 @@ export function validateRequester(options: {
 	if (!isSudoPipe(`/proc/${helperPid}/fd/1`)) return "helper stdout is not sudo's pipe";
 	return undefined;
 }
+
+/** Title of the sudo modal; the secret request modal must never reuse it (ADR 0002). */
+export const SUDO_MODAL_TITLE = "Sudo Authentication Required";
