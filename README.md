@@ -131,6 +131,18 @@ npm test                      # protocolo, auxiliar, função sudo(), ataques de
 pi install ./                 # carrega a cópia local
 ```
 
+### Hooks Git (proteção de `main`/`master`)
+
+Após clonar, ative os hooks versionados em [`.githooks/`](.githooks/):
+
+```bash
+git config core.hooksPath .githooks
+```
+
+- `pre-commit` bloqueia commit direto em branch protegida; `pre-push` bloqueia push para ela (inclusive `feat:main` e delete).
+- Protegidas: `git config hooks.protectedBranches "main master"` (padrão se não configurado).
+- Bypass consciente: `ALLOW_MAIN=1 git commit ...` / `ALLOW_MAIN=1 git push ...` (ou `--no-verify`).
+
 Decisões de arquitetura em [`docs/adr/`](docs/adr/).
 
 ## Licença
