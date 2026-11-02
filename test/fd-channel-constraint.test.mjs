@@ -5,7 +5,10 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 
-const probe = spawnSync("unshare", ["-r", "--map-auto", "/usr/bin/python3", "-I", "-c", "pass"], {
+// Probe the exact capability used below: without subordinate uid/gid ranges (e.g. GitHub
+// runners) unshare still succeeds, but setgroups/setresuid inside the namespace fail.
+const probe = spawnSync("unshare", ["-r", "--map-auto", "/usr/bin/python3", "-I", "-c",
+	"import os; os.setgroups([]); os.setresgid(1, 1, 1); os.setresuid(1, 1, 1)"], {
 	encoding: "utf8", timeout: 5_000,
 });
 const skip = process.platform !== "linux" || probe.status !== 0
