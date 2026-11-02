@@ -113,8 +113,27 @@ export function readCmdline(pid: number): string[] {
 /** The only environment the helper may run with (anything else, e.g. NODE_OPTIONS, is code injection). */
 export const HELPER_PATH = "/usr/bin:/bin";
 
-export function helperEnvironment({ socketPath, secret }: { socketPath: string; secret: string }) {
-	return { PATH: HELPER_PATH, [ENV_SOCKET]: socketPath, [ENV_SECRET]: secret };
+/** Extra variables the interpreter needs to run a script (part of the validated environment). */
+export type RuntimeEnv = Record<string, string>;
+
+/**
+ * Interpreter for the helper: the runtime pi itself runs on. pi >= 1.4 is a Bun-compiled single
+ * binary, whose execPath is `pi`: without BUN_BE_BUN it starts pi instead of running the script
+ * (issue #11). Plain node/bun need nothing.
+ */
+export function helperRuntime(proc: { execPath: string; versions: Record<string, string | undefined> } = process): {
+	nodePath: string;
+	runtimeEnv: RuntimeEnv;
+} {
+	return { nodePath: proc.execPath, runtimeEnv: proc.versions.bun ? { BUN_BE_BUN: "1" } : {} };
+}
+
+export function helperEnvironment({
+	socketPath,
+	secret,
+	runtimeEnv = {},
+}: { socketPath: string; secret: string; runtimeEnv?: RuntimeEnv }) {
+	return { ...runtimeEnv, PATH: HELPER_PATH, [ENV_SOCKET]: socketPath, [ENV_SECRET]: secret };
 }
 
 export function shellQuote(value: string): string {
@@ -127,6 +146,7 @@ export function shellQuote(value: string): string {
  */
 export function launcherScript(options: {
 	nodePath: string;
+	runtimeEnv?: RuntimeEnv;
 	helperScript: string;
 	socketPath: string;
 	secret: string;
@@ -163,6 +183,7 @@ export function validateRequester(options: {
 	sudoPid: number;
 	helperScript: string;
 	nodePath: string;
+	runtimeEnv?: RuntimeEnv;
 	socketPath: string;
 	secret: string;
 	uid: number;

@@ -44,3 +44,9 @@ Por isso:
 
 - **Lado do pi:** importa só módulos `.ts` (`protocol.ts`, `modal.ts`). Um teste estático garante isso.
 - **Auxiliar:** `askpass.mjs` é autossuficiente e sempre roda num processo novo. As poucas funções que ele duplica (assinatura, checagem de sudo e de pipe) são mantidas em sincronia com `protocol.ts` por `test/interop.test.mjs`.
+
+## Revisão (0.1.5): pi compilado com Bun (#11)
+
+A partir da 1.4, o pi é distribuído como um único binário compilado com Bun. Com isso, o `process.execPath` da extensão passou a ser o próprio `pi`, e não um `node`. O launcher executava `pi askpass.mjs <prompt>`, o que iniciava o pi em vez do auxiliar: o modal não aparecia e o sudo registrava tentativas falhas até o timeout. Os testes não pegavam o problema porque rodam sob `node`.
+
+Agora `helperRuntime()` (em `protocol.ts`) escolhe o interpretador. Quando o runtime é Bun, o launcher acrescenta `BUN_BE_BUN=1`, que faz o binário compilado se comportar como o `bun` e executar o script. Essa variável faz parte do ambiente exato que `validateRequester` confere. `test/runtime.test.mjs` roda o launcher contra um executável Bun compilado (o `pi` do PATH ou `PI_SUDO_PROMPT_TEST_BUN_EXE`).

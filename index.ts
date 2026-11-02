@@ -35,6 +35,7 @@ import { SecretRequestModal, SudoPromptModal } from "./modal.ts";
 import {
 	ENV_SECRET,
 	ENV_SOCKET,
+	helperRuntime,
 	launcherScript,
 	MAX_SKEW_MS,
 	procInfo,
@@ -52,6 +53,8 @@ const MAX_ATTEMPTS = 3; // sudoers passwd_tries default
 
 const extensionDir = dirname(fileURLToPath(import.meta.url));
 const helperScript = join(extensionDir, "askpass.mjs");
+/** Interpreter for the helper (pi's own runtime; Bun-compiled pi needs BUN_BE_BUN, issue #11). */
+const runtime = helperRuntime();
 const installer = join(extensionDir, "broker", "install.sh");
 const INSTALL_HINT = installationHint(installer);
 
@@ -195,7 +198,7 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 			helperPid,
 			sudoPid,
 			helperScript,
-			nodePath: process.execPath,
+			...runtime,
 			socketPath: bridge.socketPath,
 			secret: bridge.secret,
 			uid: process.getuid?.() ?? -1,
@@ -216,7 +219,7 @@ export default function sudoPrompt(pi: ExtensionAPI) {
 		const socketPath = join(dir, "askpass.sock");
 		const askpassPath = join(dir, "pi-askpass");
 		const secret = randomBytes(32).toString("hex");
-		writeFileSync(askpassPath, launcherScript({ nodePath: process.execPath, helperScript, socketPath, secret }), {
+		writeFileSync(askpassPath, launcherScript({ ...runtime, helperScript, socketPath, secret }), {
 			mode: 0o700,
 		});
 
