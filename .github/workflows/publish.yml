@@ -1,0 +1,55 @@
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    environment: npm
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validar tag (na main e igual à versão do package.json)
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          git merge-base --is-ancestor HEAD origin/main || {
+            echo "::error::A tag $TAG não está na história de origin/main"; exit 1; }
+          expected="v$(node -p 'require("./package.json").version')"
+          [ "$TAG" = "$expected" ] || {
+            echo "::error::Tag $TAG difere da versão do package.json ($expected)"; exit 1; }
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      # Trusted Publishing (OIDC) exige npm >= 11.5.1
+      - run: npm install --global npm@11.21.1
+
+      - run: npm ci --ignore-scripts
+
+      - run: npm test
+
+      - run: npm pack --dry-run
+
+      - run: npm publish --access public --provenance
