@@ -141,6 +141,7 @@ git config core.hooksPath .githooks
 
 - `pre-commit` roda [`gitleaks`](https://github.com/gitleaks/gitleaks) nas mudanças staged (requer o binário: `sudo pacman -S gitleaks`, `brew install gitleaks`…); falso positivo vai para `.gitleaksignore`. O CI repete a varredura no job `Secret scan (gitleaks)`.
 - `pre-commit` também bloqueia commit direto em branch protegida; `pre-push` bloqueia push para ela (inclusive `feat:main` e delete).
+- `pre-commit` também barra marcadores de conflito não resolvidos e arquivos novos acima de 500 KB (limite: `git config hooks.maxFileKB 1000`; arquivos Git LFS passam).
 - Protegidas: `git config hooks.protectedBranches "main master"` (padrão se não configurado).
 - Bypass consciente: `ALLOW_MAIN=1 git commit ...` / `ALLOW_MAIN=1 git push ...` (ou `--no-verify`).
 
