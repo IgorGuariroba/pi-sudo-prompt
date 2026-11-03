@@ -131,7 +131,7 @@ npm test                      # protocolo, auxiliar, função sudo(), ataques de
 pi install ./                 # carrega a cópia local
 ```
 
-### Hooks Git (proteção de `main`/`master`)
+### Hooks Git (proteção de `main`/`master` e segredos)
 
 Após clonar, ative os hooks versionados em [`.githooks/`](.githooks/):
 
@@ -139,7 +139,8 @@ Após clonar, ative os hooks versionados em [`.githooks/`](.githooks/):
 git config core.hooksPath .githooks
 ```
 
-- `pre-commit` bloqueia commit direto em branch protegida; `pre-push` bloqueia push para ela (inclusive `feat:main` e delete).
+- `pre-commit` roda [`gitleaks`](https://github.com/gitleaks/gitleaks) nas mudanças staged (requer o binário: `sudo pacman -S gitleaks`, `brew install gitleaks`…); falso positivo vai para `.gitleaksignore`. O CI repete a varredura no job `Secret scan (gitleaks)`.
+- `pre-commit` também bloqueia commit direto em branch protegida; `pre-push` bloqueia push para ela (inclusive `feat:main` e delete).
 - Protegidas: `git config hooks.protectedBranches "main master"` (padrão se não configurado).
 - Bypass consciente: `ALLOW_MAIN=1 git commit ...` / `ALLOW_MAIN=1 git push ...` (ou `--no-verify`).
 

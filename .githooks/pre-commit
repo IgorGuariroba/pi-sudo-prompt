@@ -1,4 +1,19 @@
 #!/bin/sh
+# 1) Varre as mudanças staged em busca de segredos (gitleaks).
+#    Instalação: sudo pacman -S gitleaks | brew install gitleaks | https://github.com/gitleaks/gitleaks
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks git --staged --redact --no-banner --log-level warn -v || {
+    echo "✋ gitleaks encontrou possíveis segredos nas mudanças staged (acima)." >&2
+    echo "   Falso positivo: adicione o fingerprint em .gitleaksignore." >&2
+    exit 1
+  }
+else
+  echo "✋ gitleaks não instalado: o pre-commit precisa dele para barrar segredos." >&2
+  echo "   Instale (ex.: sudo pacman -S gitleaks) ou, consciente, use git commit --no-verify." >&2
+  exit 1
+fi
+
+# 2) Bloqueia commit direto em branches protegidas.
 # Bloqueia commit direto em branches protegidas.
 # Protegidas: git config hooks.protectedBranches (espaço ou vírgula); padrão "main master".
 # Bypass: ALLOW_MAIN=1 git commit ...  (ou git commit --no-verify)
