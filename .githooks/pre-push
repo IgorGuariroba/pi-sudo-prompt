@@ -27,4 +27,14 @@ if [ -n "$blocked" ]; then
   } >&2
   exit 1
 fi
+
+# Qualidade: roda os testes (mesmo comando do CI) antes do push.
+# Bypass consciente: git push --no-verify
+root=$(git rev-parse --show-toplevel)
+if [ -f "$root/package.json" ] && grep -q '"test"' "$root/package.json"; then
+  (cd "$root" && npm test --silent) || {
+    echo "✋ npm test falhou: push bloqueado. Corrija os testes ou use git push --no-verify." >&2
+    exit 1
+  }
+fi
 exit 0
